@@ -1,6 +1,6 @@
 {
   "city": "홍성",
   "equipment_age": 8,
-  "triggered_by": "init",
-  "triggered_at": "2026-04-22T00:00:00"
+  "triggered_by": "streamlit",
+  "triggered_at": "2026-04-22T02:37:49.667384"
 }
