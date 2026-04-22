@@ -28,7 +28,7 @@ jobs:
           RUN_MODE:          daily
           KMA_API_KEY:       ${{ secrets.KMA_API_KEY }}
           KAKAO_API_KEY:     ${{ secrets.KAKAO_API_KEY }}
-          GITHUB_TOKEN:      ${{ secrets.DATA_GITHUB_TOKEN }}
+          DATA_REPO_TOKEN:   ${{ secrets.DATA_GITHUB_TOKEN }}
           TELEGRAM_TOKEN:    ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID:  ${{ secrets.TELEGRAM_CHAT_ID }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -40,7 +40,7 @@ jobs:
           RUN_MODE:          report
           KMA_API_KEY:       ${{ secrets.KMA_API_KEY }}
           KAKAO_API_KEY:     ${{ secrets.KAKAO_API_KEY }}
-          GITHUB_TOKEN:      ${{ secrets.DATA_GITHUB_TOKEN }}
+          DATA_REPO_TOKEN:   ${{ secrets.DATA_GITHUB_TOKEN }}
           TELEGRAM_TOKEN:    ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID:  ${{ secrets.TELEGRAM_CHAT_ID }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -52,7 +52,7 @@ jobs:
           RUN_MODE:          monitor
           KMA_API_KEY:       ${{ secrets.KMA_API_KEY }}
           KAKAO_API_KEY:     ${{ secrets.KAKAO_API_KEY }}
-          GITHUB_TOKEN:      ${{ secrets.DATA_GITHUB_TOKEN }}
+          DATA_REPO_TOKEN:   ${{ secrets.DATA_GITHUB_TOKEN }}
           TELEGRAM_TOKEN:    ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID:  ${{ secrets.TELEGRAM_CHAT_ID }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
