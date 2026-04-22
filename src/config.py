@@ -8,7 +8,7 @@ import os
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 KMA_API_KEY       = os.environ.get("KMA_API_KEY", "")
 KAKAO_API_KEY     = os.environ.get("KAKAO_API_KEY", "")
-GITHUB_TOKEN      = os.environ.get("GITHUB_TOKEN", "")
+GITHUB_TOKEN      = os.environ.get("DATA_REPO_TOKEN", "")
 TELEGRAM_TOKEN    = os.environ.get("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID  = os.environ.get("TELEGRAM_CHAT_ID", "")
 
