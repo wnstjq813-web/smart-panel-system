@@ -78,3 +78,7 @@ GITHUB_TOKEN = "ghp_여기에PAT입력"
 | 매시간 | 경보 모니터링 + 낙뢰 감지 + 대시보드 갱신 |
 
 수동 실행: Streamlit UI에서 파라미터 설정 후 버튼 클릭
+
+## 스트림릿 주소
+
+https://smart-panel-system-jzncp56hqhge5r9q6ane5r.streamlit.app/
