@@ -6,6 +6,10 @@ on:
     - cron: '0 0 * * *'
     - cron: '30 * * * *'
   workflow_dispatch:
+  workflow_run:
+    workflows: ["시뮬레이터 실행"]
+    types:
+      - completed
 
 jobs:
   run-system:
@@ -47,7 +51,7 @@ jobs:
         run: python run_system.py
 
       - name: 매시간 — 경보 모니터링
-        if: github.event.schedule == '30 * * * *' || github.event_name == 'workflow_dispatch'
+        if: github.event.schedule == '30 * * * *' || github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_run'
         env:
           RUN_MODE:          monitor
           KMA_API_KEY:       ${{ secrets.KMA_API_KEY }}
