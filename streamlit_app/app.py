@@ -260,6 +260,165 @@ with tab1:
             st.error("❌ 트리거 실패. Token 권한(workflow)을 확인하세요.")
 
     st.divider()
+
+    # ── 알림 테스트 섹션 ─────────────────────────────
+    st.subheader("🔔 Telegram 알림 테스트")
+    st.caption("실제 데이터를 건드리지 않고 각 알림 유형을 Telegram으로 전송해 메시지 형식을 확인합니다.")
+
+    TELEGRAM_TOKEN_TEST = st.secrets.get("TELEGRAM_TOKEN", "")
+    TELEGRAM_CHAT_TEST  = st.secrets.get("TELEGRAM_CHAT_ID", "8740330855")
+
+    def _send_test_msg(msg: str) -> bool:
+        if not TELEGRAM_TOKEN_TEST:
+            return False
+        import requests as _req
+        r = _req.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN_TEST}/sendMessage",
+            data={"chat_id": TELEGRAM_CHAT_TEST, "text": msg, "parse_mode": "HTML"},
+            timeout=10,
+        )
+        return r.status_code == 200
+
+    NOW_STR = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    ALERT_SAMPLES = {
+        "warn": (
+            "🟡 경고 알림",
+            f"🟡 <b>[경고] 분전반 경보</b>\n"
+            f"{NOW_STR} KST\n\n"
+            f"📊 총 부하: 16.2kW (73.6%)\n"
+            f"  경고 기준: 15.4kW | 위험 기준: 19.8kW\n\n"
+            f"🔌 이상 회로:\n"
+            f"  c5 냉난방기 (3.5kW/100%)\n"
+            f"  c3 콘센트A(PC모니터) (3.2kW/91%)\n\n"
+            f"즉시 확인 바랍니다.\n\n"
+            f"<i>⚠️ 테스트 메시지 — 실제 데이터 아님</i>",
+        ),
+        "danger": (
+            "🔴 위험 알림",
+            f"🔴 <b>[위험] 분전반 경보</b>\n"
+            f"{NOW_STR} KST\n\n"
+            f"📊 총 부하: 20.8kW (94.5%)\n"
+            f"  경고 기준: 15.4kW | 위험 기준: 19.8kW\n\n"
+            f"🔌 이상 회로:\n"
+            f"  c5 냉난방기 (3.5kW/100%)\n"
+            f"  c3 콘센트A(PC모니터) (3.5kW/100%)\n"
+            f"  c8 동력(환기팬) (3.0kW/100%)\n\n"
+            f"즉시 확인 바랍니다.\n\n"
+            f"<i>⚠️ 테스트 메시지 — 실제 데이터 아님</i>",
+        ),
+        "normal": (
+            "🟢 정상 복귀 알림",
+            f"🟢 <b>[정상] 분전반 상태 복귀</b>\n"
+            f"{NOW_STR} KST\n\n"
+            f"📊 총 부하: 10.3kW (46.8%)\n"
+            f"이전 경고 상태에서 정상으로 복귀하였습니다.\n\n"
+            f"<i>⚠️ 테스트 메시지 — 실제 데이터 아님</i>",
+        ),
+        "lgt_danger": (
+            "⚡ 낙뢰 위험 알림",
+            f"⚡ <b>[위험] 낙뢰 감지 — 즉시 확인</b>\n"
+            f"{NOW_STR}\n\n"
+            f"📍 위치: 충남 홍성군 홍성읍 오관리\n"
+            f"🏢 분전반까지: <b>3.2km</b>\n\n"
+            f"⚡ 종류: 구름-지면 (CG)\n"
+            f"💥 강도: +42.5 kA (정극성(+))\n"
+            f"📡 감지 센서: 6개\n"
+            f"📊 최근 10분 감지: 4건\n"
+            f"⚠️ c3 콘센트A(PC) / c6 서버·네트워크 회로 점검 권고\n"
+            f"⚠️ SPD(서지보호장치) 동작 여부 확인\n\n"
+            f"<i>⚠️ 테스트 메시지 — 실제 데이터 아님</i>",
+        ),
+        "lgt_warn": (
+            "🟡 낙뢰 주의 알림",
+            f"🟡 <b>[주의] 낙뢰 감지 — 모니터링 강화</b>\n"
+            f"{NOW_STR}\n\n"
+            f"📍 위치: 충남 홍성군 금마면 죽림리\n"
+            f"🏢 분전반까지: <b>14.7km</b>\n\n"
+            f"⚡ 종류: 구름-구름 (CC)\n"
+            f"💥 강도: -28.1 kA (부극성(-))\n"
+            f"📡 감지 센서: 4개\n"
+            f"📊 최근 10분 감지: 2건\n"
+            f"⚠️ 서버·민감 장비 상태 모니터링\n\n"
+            f"<i>⚠️ 테스트 메시지 — 실제 데이터 아님</i>",
+        ),
+        "report": (
+            "📋 일일 리포트",
+            f"🏢 <b>스마트 분전반 일일 리포트</b>\n"
+            f"{datetime.now().strftime('%Y년 %m월 %d일 %H:%M')} KST\n\n"
+            f"🌤 <b>날씨</b>\n  기온 12.5°C | 습도 63%\n\n"
+            f"🟢 <b>분전반 현황</b>\n"
+            f"  총 부하: 8.64kW / 22kW (39.3%)\n"
+            f"  전류: 39.3A / 100A\n"
+            f"  상태: NORMAL\n\n"
+            f"⚡ <b>회로별 부하</b>\n"
+            f"  🟢 c1 조명A: 0.56kW (37%)\n"
+            f"  🟢 c2 조명B: 0.56kW (70%)\n"
+            f"  🟢 c3 콘센트A: 1.20kW (34%)\n"
+            f"  🟢 c4 콘센트B: 0.97kW (49%)\n"
+            f"  🟢 c5 냉난방기: 1.81kW (52%)\n"
+            f"  🟢 c6 서버: 0.84kW (42%)\n"
+            f"  🟢 c7 복합기: 0.55kW (37%)\n"
+            f"  🟢 c8 환기팬: 1.28kW (43%)\n"
+            f"  🟢 c9 예비: 0.33kW (17%)\n\n"
+            f"🤖 <b>AI 모델 성능</b>\n  R² = 0.9624 | MAE = 0.600kW\n\n"
+            f"📊 대시보드: https://wnstjq813-web.github.io/smart-panel\n\n"
+            f"<i>⚠️ 테스트 메시지 — 실제 데이터 아님</i>",
+        ),
+        "accident": (
+            "🚨 사고 감지 알림",
+            f"🚨 <b>[사고 감지] 절연 열화</b>\n"
+            f"{NOW_STR} KST\n\n"
+            f"📍 발생 회로: c5 냉난방기\n"
+            f"⚠️ 심각도: warn\n\n"
+            f"📊 당시 현황:\n"
+            f"  총 부하: 13.6kW | 전류: 61.8A | 전압: 220V\n\n"
+            f"🔧 적용 수식:\n"
+            f"  절연저항 &lt; 1MΩ → 누설전류 증가\n\n"
+            f"즉시 절연 저항 측정 및 회로 점검 바랍니다.\n\n"
+            f"<i>⚠️ 테스트 메시지 — 실제 데이터 아님</i>",
+        ),
+        "all": None,  # 전체 전송용
+    }
+
+    if not TELEGRAM_TOKEN_TEST:
+        st.warning("Telegram Token이 설정되지 않아 전송할 수 없습니다.")
+    else:
+        # 개별 버튼 (2열 그리드)
+        btn_labels = [k for k in ALERT_SAMPLES if k != "all"]
+        cols = st.columns(4)
+        for i, key in enumerate(btn_labels):
+            label, _ = ALERT_SAMPLES[key]
+            with cols[i % 4]:
+                if st.button(label, key=f"test_{key}", use_container_width=True):
+                    _, msg = ALERT_SAMPLES[key]
+                    ok = _send_test_msg(msg)
+                    if ok:
+                        st.success(f"✅ '{label}' 전송 완료")
+                    else:
+                        st.error("❌ 전송 실패")
+
+        st.divider()
+
+        # 전체 일괄 전송
+        if st.button("📤 전체 알림 유형 일괄 전송", use_container_width=True):
+            results = []
+            for key, val in ALERT_SAMPLES.items():
+                if key == "all" or val is None:
+                    continue
+                label, msg = val
+                ok = _send_test_msg(msg)
+                results.append((label, ok))
+            success_cnt = sum(1 for _, ok in results if ok)
+            fail_cnt    = len(results) - success_cnt
+            if fail_cnt == 0:
+                st.success(f"✅ 전체 {success_cnt}개 알림 전송 완료")
+            else:
+                st.warning(f"⚠️ {success_cnt}개 성공 / {fail_cnt}개 실패")
+            for label, ok in results:
+                st.markdown(f"{'✅' if ok else '❌'} {label}")
+
+    st.divider()
     st.markdown(
         "[🌐 GitHub Pages 대시보드 열기]"
         "(https://wnstjq813-web.github.io/smart-panel)"
