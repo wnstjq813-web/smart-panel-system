@@ -148,11 +148,12 @@ def fetch_dashboard_json() -> dict | None:
 st.title("⚡ 스마트 분전반 시뮬레이터")
 st.caption("파라미터를 설정하고 실행 버튼을 누르면 GitHub Actions가 자동으로 시뮬레이션을 시작합니다.")
 
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🚀 시뮬레이터 실행",
     "📝 실행 로그",
     "📊 데이터 시각화",
     "📋 Actions 상태",
+    "🗄️ 데이터 현황",
 ])
 
 # ════════════════════════════════════════════════════════
@@ -580,3 +581,237 @@ with tab4:
         st.markdown(
             f"\n[🔗 Actions 전체 보기](https://github.com/{GITHUB_REPO}/actions)"
         )
+
+# ════════════════════════════════════════════════════════
+# TAB 5 — 데이터 현황
+# ════════════════════════════════════════════════════════
+with tab5:
+    st.subheader("🗄️ 데이터 현황 & AI 학습 검증")
+
+    col_r5, _ = st.columns([1, 5])
+    with col_r5:
+        if st.button("🔄 새로고침", key="data_refresh"):
+            st.cache_data.clear()
+
+    with st.spinner("데이터 불러오는 중..."):
+        df5   = fetch_csv()
+        dash5 = fetch_dashboard_json()
+
+    if df5 is None:
+        st.error("데이터 없음 — 시뮬레이터를 먼저 실행해주세요.")
+    else:
+        df5["datetime"] = pd.to_datetime(df5["datetime"])
+        df5["date"]     = df5["datetime"].dt.date
+        today           = datetime.now().date()
+
+        # ── 1. 데이터 누적 현황 ──────────────────────────
+        st.markdown("### 📦 데이터 누적 현황")
+
+        unique_dates  = sorted(df5["date"].unique())
+        total_days    = len(unique_dates)
+        total_rows    = len(df5)
+        first_date    = unique_dates[0]  if unique_dates else None
+        last_date     = unique_dates[-1] if unique_dates else None
+        today_exists  = today in unique_dates
+        rows_per_day  = {d: len(df5[df5["date"]==d]) for d in unique_dates}
+        incomplete    = [d for d, n in rows_per_day.items() if n < 24]
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("총 누적 일수",   f"{total_days}일")
+        c2.metric("총 데이터 행수", f"{total_rows:,}행")
+        c3.metric("오늘 데이터",    "✅ 있음" if today_exists else "❌ 없음")
+        c4.metric("데이터 기간",
+                  f"{first_date} ~ {last_date}" if first_date else "-")
+
+        # 날짜별 행수 막대 차트
+        if total_days > 0:
+            day_counts = pd.DataFrame({
+                "날짜":  [str(d) for d in unique_dates],
+                "행수":  [rows_per_day[d] for d in unique_dates],
+            })
+            fig_days = go.Figure(go.Bar(
+                x=day_counts["날짜"],
+                y=day_counts["행수"],
+                marker_color=[
+                    "#e74c3c" if n < 24 else "#2ecc71"
+                    for n in day_counts["행수"]
+                ],
+                text=day_counts["행수"],
+                textposition="outside",
+            ))
+            fig_days.add_hline(y=24, line_dash="dash", line_color="#f39c12",
+                               annotation_text="정상(24행)")
+            fig_days.update_layout(
+                height=220, margin=dict(t=10, b=10),
+                paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
+                font_color="white", title="날짜별 데이터 행수 (정상=24행)",
+                xaxis=dict(gridcolor="#30363d"),
+                yaxis=dict(gridcolor="#30363d", range=[0, 28]),
+            )
+            st.plotly_chart(fig_days, use_container_width=True)
+
+        # 누락/불완전 날짜 경고
+        if incomplete:
+            st.warning(f"⚠️ 데이터 불완전 날짜 ({len(incomplete)}개): "
+                       f"{', '.join(str(d) for d in incomplete)}")
+        else:
+            st.success("✅ 모든 날짜 데이터 완전 (24행씩)")
+
+        # 연속성 체크
+        if len(unique_dates) >= 2:
+            from datetime import timedelta
+            missing_days = []
+            for i in range(1, len(unique_dates)):
+                prev = unique_dates[i-1]
+                curr = unique_dates[i]
+                gap  = (curr - prev).days
+                if gap > 1:
+                    for g in range(1, gap):
+                        missing_days.append(str(prev + timedelta(days=g)))
+            if missing_days:
+                st.warning(f"⚠️ 누락된 날짜 ({len(missing_days)}개): "
+                           f"{', '.join(missing_days)}")
+            else:
+                st.success("✅ 날짜 연속성 정상 (빠진 날 없음)")
+
+        st.divider()
+
+        # ── 2. AI 학습 횟수 및 품질 검증 ────────────────
+        st.markdown("### 🤖 AI 학습 횟수 및 품질 검증")
+
+        metrics5       = (dash5 or {}).get("model_metrics", {})
+        m_total        = metrics5.get("total_load_kw", {})
+        r2             = m_total.get("r2",  None)
+        mae            = m_total.get("mae", None)
+
+        # 학습 횟수 추정 (매일 자정 1회 → 누적 일수 - 1)
+        est_train_count = max(0, total_days - 1)
+
+        # RF 품질 기준
+        def r2_grade(v):
+            if v is None: return "측정 전", "⚪"
+            if v >= 0.90: return "우수",   "🟢"
+            if v >= 0.75: return "양호",   "🟡"
+            if v >= 0.50: return "보통",   "🟠"
+            return "불량",  "🔴"
+
+        def data_grade(days):
+            if days >= 30: return "충분 (30일↑)",  "🟢"
+            if days >= 14: return "보통 (14~29일)", "🟡"
+            if days >= 7:  return "부족 (7~13일)",  "🟠"
+            return f"매우 부족 ({days}일↓)",        "🔴"
+
+        r2_label,  r2_emoji  = r2_grade(r2)
+        dat_label, dat_emoji = data_grade(total_days)
+
+        col_a, col_b, col_c, col_d = st.columns(4)
+        col_a.metric("추정 학습 횟수",   f"{est_train_count}회")
+        col_b.metric("총 부하 R²",
+                     f"{r2:.4f}" if r2 is not None else "측정 전",
+                     delta=r2_label)
+        col_c.metric("총 부하 MAE",
+                     f"{mae:.3f} kW" if mae is not None else "-")
+        col_d.metric("학습 데이터 평가", f"{dat_emoji} {dat_label}")
+
+        # 회로별 학습 품질 표
+        st.markdown("**회로별 학습 품질**")
+        circuit_metrics = {k: v for k, v in metrics5.items()
+                           if k != "total_load_kw" and k.endswith("_kw")}
+        if circuit_metrics:
+            rows_table = []
+            for col_key, mv in sorted(circuit_metrics.items()):
+                cname  = {
+                    "c1_kw":"조명A","c2_kw":"조명B","c3_kw":"콘센트A",
+                    "c4_kw":"콘센트B","c5_kw":"냉난방기","c6_kw":"서버",
+                    "c7_kw":"복합기","c8_kw":"환기팬","c9_kw":"예비",
+                }.get(col_key, col_key)
+                r2v    = mv.get("r2",  None)
+                maev   = mv.get("mae", None)
+                lbl, _ = r2_grade(r2v)
+                rows_table.append({
+                    "회로":   cname,
+                    "R²":    f"{r2v:.4f}" if r2v is not None else "-",
+                    "MAE":   f"{maev:.4f} kW" if maev is not None else "-",
+                    "평가":  lbl,
+                })
+            st.dataframe(
+                pd.DataFrame(rows_table).set_index("회로"),
+                use_container_width=True,
+            )
+
+        st.divider()
+
+        # ── 3. 데이터 이상 감지 ──────────────────────────
+        st.markdown("### 🔍 데이터 이상 감지")
+
+        issues = []
+
+        # 같은 값 반복 체크 (연속 5개 이상 동일값)
+        total_vals = df5["total_load_kw"].values
+        repeat_cnt = 0
+        max_repeat = 1
+        for i in range(1, len(total_vals)):
+            if abs(total_vals[i] - total_vals[i-1]) < 0.001:
+                repeat_cnt += 1
+                max_repeat = max(max_repeat, repeat_cnt+1)
+            else:
+                repeat_cnt = 0
+        if max_repeat >= 5:
+            issues.append(f"⚠️ 총 부하값 {max_repeat}개 연속 동일 — LLM fallback 가능성")
+
+        # 비정상적 부하 범위 체크
+        out_of_range = df5[~df5["total_load_kw"].between(0, 22)]
+        if len(out_of_range) > 0:
+            issues.append(f"⚠️ 정격 범위(0~22kW) 초과 데이터: {len(out_of_range)}행")
+
+        # 야간 부하 과다 체크 (00~06시 평균 > 5kW)
+        night_df  = df5[df5["datetime"].dt.hour.between(0, 5)]
+        night_avg = night_df["total_load_kw"].mean() if len(night_df) > 0 else 0
+        if night_avg > 5.0:
+            issues.append(f"⚠️ 야간(0~5시) 평균 부하 {night_avg:.2f}kW — 비정상적으로 높음")
+
+        # accident_type이 none인 비율 확인
+        none_ratio = (df5["accident_type"] == "none").sum() / len(df5)
+        if none_ratio < 0.3:
+            issues.append(f"⚠️ 사고 발생 비율 {(1-none_ratio)*100:.0f}% — 과도하게 높음 (정상: 20~40%)")
+        if none_ratio > 0.95:
+            issues.append(f"ℹ️ 사고 발생 비율 {(1-none_ratio)*100:.0f}% — 매우 낮음")
+
+        # 오늘 데이터 없을 때
+        if not today_exists:
+            issues.append(f"⚠️ 오늘({today}) 데이터 없음 — 시뮬레이터 실행 필요")
+
+        # 데이터 부족 경고
+        if total_days < 7:
+            issues.append(f"⚠️ 데이터 {total_days}일치 — AI 학습 신뢰도 낮음 (최소 7일 권장)")
+
+        if issues:
+            for issue in issues:
+                if issue.startswith("⚠️"):
+                    st.warning(issue)
+                else:
+                    st.info(issue)
+        else:
+            st.success("✅ 이상 없음 — 데이터 정상 수집 중")
+
+        st.divider()
+
+        # ── 4. 권장 액션 ─────────────────────────────────
+        st.markdown("### 💡 권장 액션")
+
+        actions = []
+        if not today_exists:
+            actions.append("🚀 **시뮬레이터 실행** — 오늘 데이터 생성 필요")
+        if total_days < 7:
+            actions.append(f"📅 **{7-total_days}일 더** 시뮬레이터 실행 — 최소 7일 데이터 필요")
+        if total_days < 30:
+            actions.append(f"📅 **{30-total_days}일 더** 누적 시 AI 학습 품질 우수 단계 진입")
+        if r2 is not None and r2 < 0.75:
+            actions.append("🤖 **데이터 추가 필요** — R²가 낮아 예측 신뢰도 부족")
+        if incomplete:
+            actions.append("🔧 **불완전 날짜 재실행** — 24행 미만 날짜 재생성 권장")
+        if not actions:
+            actions.append("✅ 현재 상태 양호 — 자동 스케줄러가 정상 운영 중")
+
+        for action in actions:
+            st.markdown(f"- {action}")
