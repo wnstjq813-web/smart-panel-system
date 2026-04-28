@@ -268,16 +268,25 @@ with tab1:
     TELEGRAM_TOKEN_TEST = st.secrets.get("TELEGRAM_TOKEN", "")
     TELEGRAM_CHAT_TEST  = st.secrets.get("TELEGRAM_CHAT_ID", "8740330855")
 
-    def _send_test_msg(msg: str) -> bool:
+    def _send_test_msg(msg: str):
         if not TELEGRAM_TOKEN_TEST:
-            return False
+            return "Token 없음"
         import requests as _req
-        r = _req.post(
-            f"https://api.telegram.org/bot{TELEGRAM_TOKEN_TEST}/sendMessage",
-            data={"chat_id": TELEGRAM_CHAT_TEST, "text": msg, "parse_mode": "HTML"},
-            timeout=10,
-        )
-        return r.status_code == 200
+        try:
+            r = _req.post(
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN_TEST}/sendMessage",
+                data={"chat_id": TELEGRAM_CHAT_TEST, "text": msg, "parse_mode": "HTML"},
+                timeout=10,
+            )
+            if r.status_code == 200:
+                return True
+            try:
+                err = r.json()
+                return f"HTTP {r.status_code} — {err.get('description', r.text[:120])}"
+            except:
+                return f"HTTP {r.status_code} — {r.text[:120]}"
+        except Exception as e:
+            return f"요청 오류: {str(e)[:120]}"
 
     NOW_STR = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -392,11 +401,11 @@ with tab1:
             with cols[i % 4]:
                 if st.button(label, key=f"test_{key}", use_container_width=True):
                     _, msg = ALERT_SAMPLES[key]
-                    ok = _send_test_msg(msg)
-                    if ok:
+                    result = _send_test_msg(msg)
+                    if result is True:
                         st.success(f"✅ '{label}' 전송 완료")
                     else:
-                        st.error("❌ 전송 실패")
+                        st.error(f"❌ 전송 실패: {result}")
 
         st.divider()
 
@@ -407,16 +416,19 @@ with tab1:
                 if key == "all" or val is None:
                     continue
                 label, msg = val
-                ok = _send_test_msg(msg)
-                results.append((label, ok))
-            success_cnt = sum(1 for _, ok in results if ok)
+                result = _send_test_msg(msg)
+                results.append((label, result))
+            success_cnt = sum(1 for _, r in results if r is True)
             fail_cnt    = len(results) - success_cnt
             if fail_cnt == 0:
                 st.success(f"✅ 전체 {success_cnt}개 알림 전송 완료")
             else:
                 st.warning(f"⚠️ {success_cnt}개 성공 / {fail_cnt}개 실패")
-            for label, ok in results:
-                st.markdown(f"{'✅' if ok else '❌'} {label}")
+            for label, result in results:
+                if result is True:
+                    st.markdown(f"✅ {label}")
+                else:
+                    st.markdown(f"❌ {label} — `{result}`")
 
     st.divider()
     st.markdown(
