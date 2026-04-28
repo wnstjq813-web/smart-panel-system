@@ -3,13 +3,14 @@ climate_hourly.py — 시간별 기후 데이터 수집 (STEP 13)
 """
 import requests
 from datetime import datetime
+from src.config import now_kst
 from src.config import KMA_API_KEY, KAKAO_API_KEY
 from src.lightning import fetch_lightning, summarize_lightning
 
 KMA_BASE_URL = "https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0"
 
 def fetch_hourly_climate(kma_key, nx, ny):
-    now    = datetime.now()
+    now    = now_kst()
     result = {}
 
     # 초단기실황

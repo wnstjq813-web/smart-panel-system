@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import joblib, os, json, warnings
 from datetime import datetime
+from src.config import now_kst
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import r2_score, mean_absolute_error
@@ -70,7 +71,7 @@ def train_models(df):
         metrics[col] = {"r2":round(r2_score(y_te[col],pred_c),4),
                          "mae":round(mean_absolute_error(y_te[col],pred_c),4)}
     os.makedirs("models", exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M")
+    ts = now_kst().strftime("%Y%m%d_%H%M")
     joblib.dump(models["total_load_kw"], "models/latest_total_load.pkl")
     joblib.dump(models, f"models/all_models_{ts}.pkl")
     with open(f"models/model_meta_{ts}.json","w",encoding="utf-8") as f:

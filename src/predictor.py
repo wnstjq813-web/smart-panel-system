@@ -3,11 +3,12 @@ predictor.py — 부하 예측 및 경보 판정 (STEP 11)
 """
 import pandas as pd
 from datetime import datetime
+from src.config import now_kst
 from src.config import PANEL_CONFIG, CIRCUITS, WARN_KW, DANGER_KW
 from src.ml_trainer import build_features
 
 def predict_load(weather, models, feature_names, latest_summary=None, now=None):
-    if now is None: now = datetime.now()
+    if now is None: now = now_kst()
     season_map = {1:"winter",2:"winter",3:"spring",4:"spring",5:"spring",
                   6:"summer",7:"summer",8:"summer",9:"autumn",10:"autumn",11:"autumn",12:"winter"}
     slot_map   = {**{h:"night" for h in list(range(0,7))+[22,23]},

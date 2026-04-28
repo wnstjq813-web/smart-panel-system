@@ -3,7 +3,8 @@ lightning.py — 낙뢰 감지 모듈 (STEP 4)
 """
 import requests
 import math
-from datetime import datetime, timedelta
+from datetime import datetime
+from src.config import now_kst, timedelta
 
 LGT_BASE_URL   = "http://apis.data.go.kr/1360000/LgtInfoService/getLgt"
 KAKAO_GEO_URL  = "https://dapi.kakao.com/v2/local/geo/coord2address.json"
@@ -46,7 +47,7 @@ def reverse_geocode_kakao(lat, lon, kakao_key):
         return f"{lat:.4f}°N / {lon:.4f}°E"
 
 def fetch_lightning(kma_key, kakao_key, now=None, panel_lat=None, panel_lon=None):
-    if now is None:      now       = datetime.now()
+    if now is None:      now       = now_kst()
     if panel_lat is None: panel_lat = PANEL_LOCATION["lat"]
     if panel_lon is None: panel_lon = PANEL_LOCATION["lon"]
 

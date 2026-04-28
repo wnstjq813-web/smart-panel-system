@@ -3,6 +3,7 @@ dashboard.py — 대시보드 업데이트 모듈 (STEP 15)
 """
 import json
 from datetime import datetime
+from src.config import now_kst
 from src.config import (KMA_API_KEY, KAKAO_API_KEY, GITHUB_TOKEN,
                          DASHBOARD_REPO, PANEL_CONFIG, WARN_KW, DANGER_KW, CITY)
 from src.kma_weather import get_grid
@@ -13,7 +14,7 @@ from src.calendar_builder import (get_historical_averages, fetch_forecast_calend
 from src.github_utils import github_push_file
 
 def build_dashboard_data(prediction, weather, df_sim, metrics, models, feature_names):
-    now = datetime.now()
+    now = now_kst()
 
     # 낙뢰
     lgt_data    = fetch_lightning(kma_key=KMA_API_KEY, kakao_key=KAKAO_API_KEY, now=now)
@@ -100,7 +101,7 @@ def update_dashboard(prediction, weather, df_sim, metrics, models, feature_names
     ok   = github_push_file(
         content_str=json.dumps(data, ensure_ascii=False, indent=2),
         repo_path="dashboard_data.json",
-        commit_msg=f"[스마트분전반] {datetime.now().strftime('%Y-%m-%d %H:%M')} 업데이트",
+        commit_msg=f"[스마트분전반] {now_kst().strftime('%Y-%m-%d %H:%M')} 업데이트",
         token=GITHUB_TOKEN,
         repo=DASHBOARD_REPO,
     )

@@ -9,6 +9,7 @@ import requests, base64, json, io, time
 from collections import defaultdict
 import pandas as pd
 from datetime import datetime, timedelta
+from src.config import now_kst
 from src.config import GITHUB_TOKEN, GITHUB_REPO
 
 DATA_REPO = "wnstjq813-web/smart-panel-data"  # 데이터 전용 저장소
@@ -60,7 +61,7 @@ def push_simulation_results(csv_path="panel_simulation.csv", token=None, repo=No
     """
     token = token or GITHUB_TOKEN
     repo  = repo  or DATA_REPO
-    now   = datetime.now()
+    now   = now_kst()
     date_str = now.strftime("%Y-%m-%d %H:%M:%S")
     today_str = now.strftime("%Y-%m-%d")
 
@@ -253,12 +254,12 @@ def save_asos_cache(cache_obj, token=None, repo=None):
     return github_push_file(
         content_str=json.dumps(cache_obj, ensure_ascii=False, indent=2),
         repo_path=ASOS_CACHE_PATH,
-        commit_msg=f"[ASOS] 기후 캐시 업데이트 {datetime.now().strftime('%Y-%m-%d')}",
+        commit_msg=f"[ASOS] 기후 캐시 업데이트 {now_kst().strftime('%Y-%m-%d')}",
         token=token, repo=repo,
     )
 
 def build_asos_cache_full(api_key, token=None, repo=None):
-    now        = datetime.now()
+    now        = now_kst()
     end_year   = now.year - 1
     start_year = end_year - ASOS_YEARS + 1
     print(f"[ASOS] 최초 수집 시작: {start_year}~{end_year}년")
@@ -285,7 +286,7 @@ def update_asos_cache_daily(api_key, token=None, repo=None):
         print("[ASOS] 캐시 없음 → 최초 전체 수집 시작")
         from src.config import KMA_API_KEY
         return build_asos_cache_full(api_key, token, repo)
-    now       = datetime.now()
+    now       = now_kst()
     today     = now.date()
     yesterday = today - timedelta(days=1)
     if cache.get("last_updated") == str(today):

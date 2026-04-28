@@ -5,6 +5,7 @@ ASOS 캐시 방식으로 변경 — GitHub에 저장된 캐시 우선 사용
 import requests
 import calendar as cal_lib
 from datetime import datetime
+from src.config import now_kst
 import pandas as pd
 from src.config import KMA_API_KEY, GITHUB_TOKEN, GITHUB_REPO, WARN_KW, DANGER_KW
 from src.ml_trainer import build_features
@@ -67,7 +68,7 @@ def build_daily_actual(df_sim):
 def fetch_forecast_calendar(nx, ny, api_key, year, month):
     result = {}
     if not api_key: return result
-    now        = datetime.now()
+    now        = now_kst()
     base_hours = [2,5,8,11,14,17,20,23]
     base_h     = max([h for h in base_hours if h <= now.hour-1], default=2)
     params = {"serviceKey":api_key,"numOfRows":1000,"pageNo":1,"dataType":"JSON",

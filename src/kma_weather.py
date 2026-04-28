@@ -2,7 +2,8 @@
 kma_weather.py — KMA 날씨 API 모듈 (STEP 3)
 """
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime
+from src.config import now_kst, timedelta
 
 KMA_BASE_URL    = "https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0"
 FCST_BASE_TIMES = ["0200","0500","0800","1100","1400","1700","2000","2300"]
@@ -38,7 +39,7 @@ def get_ncst_base_datetime(now):
     return adj.strftime("%Y%m%d"), adj.strftime("%H") + "00"
 
 def _default_weather(now=None):
-    if now is None: now = datetime.now()
+    if now is None: now = now_kst()
     m = now.month
     if m in [3,4,5]:    return {"temperature":15.0,"humidity":55,"weather_code":"partly_cloudy","is_thunder":False}
     elif m in [6,7,8]:  return {"temperature":28.0,"humidity":75,"weather_code":"cloudy","is_thunder":False}
@@ -46,7 +47,7 @@ def _default_weather(now=None):
     else:               return {"temperature":2.0, "humidity":50,"weather_code":"clear","is_thunder":False}
 
 def fetch_village_forecast(nx, ny, api_key, now=None):
-    if now is None: now = datetime.now()
+    if now is None: now = now_kst()
     if not api_key: return {}
     base_date, base_time = get_fcst_base_datetime(now)
     params = {"serviceKey":api_key,"numOfRows":300,"pageNo":1,"dataType":"JSON",
@@ -76,7 +77,7 @@ def fetch_village_forecast(nx, ny, api_key, now=None):
         return {}
 
 def fetch_realtime_weather(nx, ny, api_key, now=None):
-    if now is None: now = datetime.now()
+    if now is None: now = now_kst()
     if not api_key: return None
     base_date, base_time = get_ncst_base_datetime(now)
     params = {"serviceKey":api_key,"numOfRows":10,"pageNo":1,"dataType":"JSON",
@@ -96,7 +97,7 @@ def fetch_realtime_weather(nx, ny, api_key, now=None):
         return None
 
 def get_today_weather(nx, ny, api_key, now=None):
-    if now is None: now = datetime.now()
+    if now is None: now = now_kst()
     print(f"[KMA] 날씨 조회 중... (NX={nx}, NY={ny})")
     realtime = fetch_realtime_weather(nx, ny, api_key, now)
     hourly   = fetch_village_forecast(nx, ny, api_key, now)
@@ -119,7 +120,7 @@ def get_weather_for_hour(weather_data, hour):
             "weather_code":weather_data["weather_code"],"is_thunder":weather_data["is_thunder"]}
 
 def fetch_current_weather(nx, ny, api_key, now=None):
-    if now is None: now = datetime.now()
+    if now is None: now = now_kst()
     if not api_key: return _default_weather(now)
     adj    = now - timedelta(minutes=15)
     params = {"serviceKey":api_key,"numOfRows":10,"pageNo":1,"dataType":"JSON",

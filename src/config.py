@@ -1,20 +1,28 @@
 """
 config.py — API 키 및 기본 설정
-수정: GITHUB_TOKEN → DATA_REPO_TOKEN (Actions 예약어 충돌 방지)
+수정: KST 시간 유틸 함수 추가 (now_kst)
 """
 import os
+from datetime import datetime, timezone, timedelta
+
+# ── KST 시간 유틸 ─────────────────────────────────────
+KST = timezone(timedelta(hours=9))
+
+def now_kst() -> datetime:
+    """항상 KST 기준 현재 시각 반환 (Actions/로컬 모두 동일)"""
+    return datetime.now(tz=KST).replace(tzinfo=None)
 
 # ── API 키 ────────────────────────────────────────────
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 KMA_API_KEY       = os.environ.get("KMA_API_KEY", "")
 KAKAO_API_KEY     = os.environ.get("KAKAO_API_KEY", "")
-GITHUB_TOKEN      = os.environ.get("DATA_REPO_TOKEN", "")   # [수정]
+GITHUB_TOKEN      = os.environ.get("DATA_REPO_TOKEN", "")
 TELEGRAM_TOKEN    = os.environ.get("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID  = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 # ── GitHub 저장소 ─────────────────────────────────────
-GITHUB_REPO    = "wnstjq813-web/smart-panel-data"   # 데이터 저장소
-DASHBOARD_REPO = "wnstjq813-web/smart-panel"         # GitHub Pages
+GITHUB_REPO    = "wnstjq813-web/smart-panel-data"
+DASHBOARD_REPO = "wnstjq813-web/smart-panel"
 
 # ── 시스템 기본 설정 ──────────────────────────────────
 CITY          = "홍성"
