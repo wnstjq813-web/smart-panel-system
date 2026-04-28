@@ -1,0 +1,87 @@
+name: 스마트 분전반 시스템
+
+on:
+  schedule:
+    - cron: '0 15 * * *'     # 자정 KST (UTC 15:00)
+    - cron: '0 0 * * *'      # 오전 9시 KST (UTC 00:00)
+    - cron: '30 * * * *'     # 매시간 30분
+  workflow_dispatch:
+    inputs:
+      run_mode:
+        description: '실행 모드 선택'
+        required: true
+        default: 'monitor'
+        type: choice
+        options:
+          - monitor
+          - report
+          - daily
+  workflow_run:
+    workflows: ["시뮬레이터 실행"]
+    types:
+      - completed
+
+jobs:
+  run-system:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Python 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 패키지 설치
+        run: pip install -r requirements.txt
+
+      - name: 자정 — 일일 파이프라인
+        if: github.event.schedule == '0 15 * * *'
+        env:
+          RUN_MODE:          daily
+          KMA_API_KEY:       ${{ secrets.KMA_API_KEY }}
+          KAKAO_API_KEY:     ${{ secrets.KAKAO_API_KEY }}
+          DATA_REPO_TOKEN:   ${{ secrets.DATA_GITHUB_TOKEN }}
+          TELEGRAM_TOKEN:    ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID:  ${{ secrets.TELEGRAM_CHAT_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python run_system.py
+
+      - name: 오전 9시 — 일일 리포트
+        if: github.event.schedule == '0 0 * * *'
+        env:
+          RUN_MODE:          report
+          KMA_API_KEY:       ${{ secrets.KMA_API_KEY }}
+          KAKAO_API_KEY:     ${{ secrets.KAKAO_API_KEY }}
+          DATA_REPO_TOKEN:   ${{ secrets.DATA_GITHUB_TOKEN }}
+          TELEGRAM_TOKEN:    ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID:  ${{ secrets.TELEGRAM_CHAT_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python run_system.py
+
+      - name: 매시간 · 시뮬레이터 완료 후 — 경보 모니터링
+        if: >
+          github.event.schedule == '30 * * * *' ||
+          github.event_name == 'workflow_run'
+        env:
+          RUN_MODE:          monitor
+          KMA_API_KEY:       ${{ secrets.KMA_API_KEY }}
+          KAKAO_API_KEY:     ${{ secrets.KAKAO_API_KEY }}
+          DATA_REPO_TOKEN:   ${{ secrets.DATA_GITHUB_TOKEN }}
+          TELEGRAM_TOKEN:    ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID:  ${{ secrets.TELEGRAM_CHAT_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python run_system.py
+
+      - name: 수동 실행 — 선택 모드
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          RUN_MODE:          ${{ github.event.inputs.run_mode }}
+          KMA_API_KEY:       ${{ secrets.KMA_API_KEY }}
+          KAKAO_API_KEY:     ${{ secrets.KAKAO_API_KEY }}
+          DATA_REPO_TOKEN:   ${{ secrets.DATA_GITHUB_TOKEN }}
+          TELEGRAM_TOKEN:    ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID:  ${{ secrets.TELEGRAM_CHAT_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python run_system.py
