@@ -1,8 +1,8 @@
 {
   "city": "홍성",
   "equipment_age": 8,
-  "forced_accident": "overcurrent",
+  "forced_accident": "overvoltage",
   "special_event": "auto",
   "triggered_by": "streamlit",
-  "triggered_at": "2026-04-22T06:08:48.525451"
+  "triggered_at": "2026-04-28T00:50:25.482944"
 }
