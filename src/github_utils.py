@@ -325,3 +325,106 @@ def get_asos_avg_data(api_key, token=None, repo=None):
     print("[ASOS] 캐시 없음 → 최초 전체 수집")
     cache = build_asos_cache_full(api_key, token, repo)
     return cache.get("avg_data", {})
+
+
+# ── Staged CSV (시간별 공개용) ────────────────────────
+STAGED_PATH = "data/panel_staged.csv"
+
+def push_staged_csv(csv_path="panel_staged.csv", token=None, repo=None):
+    """
+    시뮬레이터가 생성한 24시간 staged CSV → GitHub에 저장
+    panel_simulation.csv(누적)와 별개로 보관
+    """
+    token = token or GITHUB_TOKEN
+    repo  = repo  or DATA_REPO
+    try:
+        with open(csv_path, "r", encoding="utf-8-sig") as f:
+            content = f.read()
+    except FileNotFoundError:
+        print(f"[Staged] {csv_path} 없음")
+        return False
+    ok = github_push_file(
+        content_str=content,
+        repo_path=STAGED_PATH,
+        commit_msg=f"[시뮬레이터] {now_kst().strftime('%Y-%m-%d')} staged 저장",
+        token=token, repo=repo,
+    )
+    if ok:
+        rows = len(content.strip().split("\n")) - 1
+        print(f"[Staged] push 완료 — {rows}행")
+    return ok
+
+def fetch_staged_csv(token=None, repo=None):
+    """staged CSV 읽기 → DataFrame 반환"""
+    token = token or GITHUB_TOKEN
+    repo  = repo  or DATA_REPO
+    content = github_get_file(STAGED_PATH, token, repo)
+    if content is None:
+        print("[Staged] staged CSV 없음 — 시뮬레이터 먼저 실행 필요")
+        return None
+    return pd.read_csv(io.StringIO(content))
+
+def release_hourly_row(hour=None, token=None, repo=None):
+    """
+    staged CSV에서 현재 시간(hour) 행을 꺼내
+    panel_simulation.csv(누적)에 append 후 GitHub push
+    반환값: 해당 행 dict (사고 정보 포함) | None
+    """
+    token = token or GITHUB_TOKEN
+    repo  = repo  or DATA_REPO
+    now   = now_kst()
+    if hour is None:
+        hour = now.hour
+
+    # staged 읽기
+    df_staged = fetch_staged_csv(token, repo)
+    if df_staged is None:
+        return None
+
+    # 오늘 날짜 + 해당 시간 행 찾기
+    today_str = now.strftime("%Y-%m-%d")
+    df_staged["_dt"]   = pd.to_datetime(df_staged["datetime"])
+    df_staged["_hour"] = df_staged["_dt"].dt.hour
+    df_staged["_date"] = df_staged["_dt"].dt.strftime("%Y-%m-%d")
+
+    row_df = df_staged[
+        (df_staged["_date"] == today_str) &
+        (df_staged["_hour"] == hour)
+    ].drop(columns=["_dt","_hour","_date"])
+
+    if len(row_df) == 0:
+        print(f"[Staged] {today_str} {hour:02d}시 행 없음")
+        return None
+
+    row_dict = row_df.iloc[0].to_dict()
+
+    # 기존 누적 CSV 읽기
+    existing_content = github_get_file("data/panel_simulation.csv", token, repo)
+    if existing_content:
+        try:
+            existing_df = pd.read_csv(io.StringIO(existing_content))
+            # 이미 해당 datetime이 있으면 스킵
+            target_dt = row_dict.get("datetime","")
+            if "datetime" in existing_df.columns and (existing_df["datetime"] == target_dt).any():
+                print(f"[Staged] {target_dt} 이미 존재 — 스킵")
+                return row_dict
+            merged_df = pd.concat([existing_df, row_df], ignore_index=True)
+        except Exception as e:
+            print(f"[Staged] 기존 CSV 병합 실패: {e}")
+            merged_df = row_df
+    else:
+        merged_df = row_df
+
+    merged_df = merged_df.sort_values("datetime").reset_index(drop=True)
+    csv_out   = merged_df.to_csv(index=False, encoding="utf-8-sig")
+
+    ok = github_push_file(
+        content_str=csv_out,
+        repo_path="data/panel_simulation.csv",
+        commit_msg=f"[모니터] {today_str} {hour:02d}시 행 공개",
+        token=token, repo=repo,
+    )
+    if ok:
+        acc = row_dict.get("accident_type","none")
+        print(f"[Staged] {today_str} {hour:02d}시 공개 완료 | 사고: {acc}")
+    return row_dict if ok else None

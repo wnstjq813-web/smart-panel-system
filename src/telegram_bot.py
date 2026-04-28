@@ -61,3 +61,47 @@ def build_alert_message(prediction):
             f"🔌 이상 회로:\n"
             f"  {chr(10).join(bad) if bad else '전체 점검 필요'}\n\n"
             f"즉시 확인 바랍니다.")
+
+
+ACCIDENT_KO = {
+    "none":"없음","overcurrent":"과전류","earth_fault":"지락",
+    "voltage_abnormality":"전압이상","motor_lock":"모터구속",
+    "lightning_surge":"낙뢰서지","overvoltage":"과전압",
+    "insulation_degradation":"절연열화","contact_failure":"접촉불량",
+    "harmonic_distortion":"고조파","low_power_factor":"역률저하",
+    "cb_aging_trip":"CB노화","arc_fault":"아크고장",
+}
+
+CIRCUIT_NAME = {
+    "c1":"조명A","c2":"조명B","c3":"콘센트A","c4":"콘센트B",
+    "c5":"냉난방기","c6":"서버","c7":"복합기","c8":"환기팬","c9":"예비","none":"미상",
+}
+
+def build_accident_alert(row: dict) -> str:
+    """staged CSV 행 기반 사고 알림 메시지"""
+    from src.config import now_kst
+    acc_type = row.get("accident_type", "none")
+    acc_name = ACCIDENT_KO.get(acc_type, acc_type)
+    severity = row.get("accident_severity", "info")
+    circuit  = row.get("accident_circuit",  "none")
+    dt_str   = str(row.get("datetime",""))[:16].replace("T"," ")
+
+    sev_emoji = {"critical":"🔴","warn":"🟡","info":"🔵"}.get(severity,"⚠️")
+    sev_label = {"critical":"위험","warn":"경고","info":"정보"}.get(severity, severity)
+    cname     = CIRCUIT_NAME.get(circuit, circuit)
+
+    load_kw   = float(row.get("total_load_kw",  0))
+    current_a = float(row.get("total_current_a",0))
+    voltage_v = float(row.get("supply_voltage_v",220))
+
+    return (
+        f"{sev_emoji} <b>[사고 감지] {acc_name}</b>\n"
+        f"{dt_str} KST\n\n"
+        f"📍 발생 회로: <b>{cname}</b> ({circuit})\n"
+        f"⚠️ 심각도: {sev_label}\n\n"
+        f"📊 당시 현황:\n"
+        f"  총 부하: {load_kw:.2f}kW | "
+        f"전류: {current_a:.1f}A | "
+        f"전압: {voltage_v:.0f}V\n\n"
+        f"즉시 해당 회로 점검 바랍니다."
+    )
