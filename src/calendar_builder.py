@@ -23,14 +23,19 @@ def _get_day_icon(pty, sky):
 
 # ── 일별 실적 집계 ────────────────────────────────────
 def build_daily_actual(df_sim):
-    """CSV 누적 데이터 → 날짜별 실적 집계"""
+    """CSV 누적 데이터 → 날짜별 실적 집계 (오늘은 현재 시각 이전만)"""
     result = {}
     if df_sim is None or len(df_sim) == 0:
         return result
     try:
+        from src.config import now_kst
+        now = now_kst()
         df = df_sim.copy()
         df["_dt"]   = pd.to_datetime(df["datetime"])
         df["_date"] = df["_dt"].dt.strftime("%Y-%m-%d")
+        today_str   = now.strftime("%Y-%m-%d")
+        # 오늘 날짜 행은 현재 시각 이전만 포함
+        df = df[(df["_date"] != today_str) | (df["_dt"] <= now.replace(minute=59, second=59))]
         for date, grp in df.groupby("_date"):
             acc_count = int((grp["accident_type"] != "none").sum())
             if   (grp["panel_status"] == "danger").any(): status = "danger"

@@ -89,11 +89,29 @@ def build_dashboard_data(prediction, weather, df_sim, metrics,
     # hourly 구성 (실제 + staged 혼합)
     hourly = build_hourly(df_sim, df_staged, now, hourly_climate)
 
-    # 사고 이력 — df_sim 기반 (공개된 것만)
+    # 사고 이력 — 현재 시각 이전 행만 (미래 staged 제외)
     accident_log = []
-    df_acc_src   = df_sim  # 공개된 누적 데이터에서만 이력 표시
-    if df_acc_src is not None and len(df_acc_src) > 0:
-        for _, row in df_acc_src[df_acc_src["accident_type"] != "none"].tail(20).iterrows():
+    # df_sim(누적) + df_staged(오늘 공개분) 합치되 현재 시각까지만
+    acc_frames = []
+    if df_sim is not None and len(df_sim) > 0:
+        acc_frames.append(df_sim)
+    if df_staged is not None and len(df_staged) > 0:
+        # staged 중 오늘 현재 시각 이전 행만 포함
+        df_s = df_staged.copy()
+        df_s["_dt"] = pd.to_datetime(df_s["datetime"])
+        df_s = df_s[df_s["_dt"] <= now.replace(minute=59, second=59)].drop(columns=["_dt"])
+        if len(df_s) > 0:
+            acc_frames.append(df_s)
+
+    if acc_frames:
+        df_acc_src = pd.concat(acc_frames, ignore_index=True).drop_duplicates("datetime")
+        df_acc_src["_dt"] = pd.to_datetime(df_acc_src["datetime"])
+        # 현재 시각 이전 + 사고 있는 행만
+        df_acc_src = df_acc_src[
+            (df_acc_src["accident_type"] != "none") &
+            (df_acc_src["_dt"] <= now.replace(minute=59, second=59))
+        ].sort_values("_dt").tail(20)
+        for _, row in df_acc_src.iterrows():
             accident_log.append({
                 "datetime": str(row["datetime"]),
                 "type":     str(row["accident_type"]),
