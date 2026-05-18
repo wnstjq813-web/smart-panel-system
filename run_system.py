@@ -1,6 +1,6 @@
 """
 run_system.py — 스마트 분전반 시스템 실행 진입점
-수정: monitor 모드에서 staged → 시간별 1행 공개 + 사고 알림
+수정: workflow_run(시뮬레이터 완료) 시 지난 시간 backfill 추가
 """
 import os
 from src.config import (CITY, KMA_API_KEY, GITHUB_TOKEN,
@@ -15,25 +15,36 @@ from src.telegram_bot import (send_telegram, build_daily_report,
 from src.lightning import fetch_lightning, build_lightning_alert
 from src.dashboard import update_dashboard
 
-MODE = os.environ.get("RUN_MODE", "monitor")
+MODE       = os.environ.get("RUN_MODE", "monitor")
+EVENT_NAME = os.environ.get("GITHUB_EVENT_NAME", "")  # workflow_run 감지
+
+def backfill_past_hours(now):
+    """
+    시뮬레이터 완료 후 호출 — 0 ~ (현재시간-1) 중 누락된 행을 일괄 공개
+    수동 실행 시 아침에 돌리면 0~9시 데이터가 없는 문제 해결
+    """
+    if now.hour == 0:
+        return  # 자정에는 backfill 불필요
+    print(f"\n[Backfill] 0~{now.hour-1}시 누락 행 확인 중...")
+    filled = 0
+    for h in range(0, now.hour):
+        result = release_hourly_row(hour=h, token=GITHUB_TOKEN, repo=DATA_REPO)
+        if result:
+            filled += 1
+    print(f"[Backfill] 완료 — {filled}개 행 추가")
 
 def run_daily():
     now = now_kst()
     print(f"\n{'='*50}\n 일일 파이프라인: {now.strftime('%Y-%m-%d %H:%M:%S')} KST\n{'='*50}")
-
     print("\n[0/4] ASOS 기후 캐시 업데이트...")
     update_asos_cache_daily(KMA_API_KEY, GITHUB_TOKEN, DATA_REPO)
-
-    # staged CSV가 있으면 학습에 활용 (누적이 적을 경우 보완)
     df_sim, latest_summary = fetch_simulation_data()
     df_staged              = fetch_staged_csv(GITHUB_TOKEN, DATA_REPO)
-
     import pandas as pd
     if df_sim is not None and len(df_sim) >= 24:
         df_train = df_sim
         print(f"[학습] 누적 CSV 사용: {len(df_train)}행")
     elif df_staged is not None:
-        # 누적 부족 → staged로 보완
         if df_sim is not None and len(df_sim) > 0:
             df_train = pd.concat([df_sim, df_staged], ignore_index=True).drop_duplicates("datetime")
         else:
@@ -42,7 +53,6 @@ def run_daily():
     else:
         df_train = df_sim
         print("[학습] 데이터 없음")
-
     models, metrics, feature_names = train_models(df_train)
     NX, NY          = get_grid(CITY)
     current_weather = fetch_current_weather(NX, NY, KMA_API_KEY)
@@ -55,14 +65,12 @@ def run_daily():
 def run_report():
     now = now_kst()
     print(f"\n[리포트] {now.strftime('%Y-%m-%d %H:%M:%S')} KST 리포트 전송 중...")
-    df_sim, latest_summary         = fetch_simulation_data()
-    df_staged                      = fetch_staged_csv(GITHUB_TOKEN, DATA_REPO)
-
+    df_sim, latest_summary = fetch_simulation_data()
+    df_staged              = fetch_staged_csv(GITHUB_TOKEN, DATA_REPO)
     import pandas as pd
     df_train = df_sim
     if (df_sim is None or len(df_sim) < 24) and df_staged is not None:
         df_train = df_staged
-
     models, metrics, feature_names = train_models(df_train)
     NX, NY  = get_grid(CITY)
     weather = fetch_current_weather(NX, NY, KMA_API_KEY)
@@ -72,13 +80,19 @@ def run_report():
     print("[리포트] 전송 완료")
 
 def run_monitor():
-    now = now_kst()
-    print(f"\n[모니터] {now.strftime('%Y-%m-%d %H:%M')} KST 경보 모니터링 시작")
+    now        = now_kst()
+    is_sim_run = (EVENT_NAME == "workflow_run")  # 시뮬레이터 완료로 트리거됐는지
+    print(f"\n[모니터] {now.strftime('%Y-%m-%d %H:%M')} KST "
+          f"{'(시뮬레이터 완료 트리거)' if is_sim_run else ''}")
 
-    # ── 1. staged → 현재 시간 행 공개 ─────────────────
+    # ── 1. 지난 시간 backfill (시뮬레이터 완료 시에만) ──
+    if is_sim_run:
+        backfill_past_hours(now)
+
+    # ── 2. 현재 시간 행 공개 ──────────────────────────
     released = release_hourly_row(hour=now.hour, token=GITHUB_TOKEN, repo=DATA_REPO)
 
-    # ── 2. 사고 알림 (staged 행 기반) ─────────────────
+    # ── 3. 사고 알림 ──────────────────────────────────
     if released:
         acc = released.get("accident_type", "none")
         sev = released.get("accident_severity", "none")
@@ -87,25 +101,22 @@ def run_monitor():
             send_telegram(msg, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
             print(f"[사고 알림] {acc} / {sev}")
 
-    # ── 3. 누적 데이터로 RF 예측 + 부하 경보 ──────────
-    df_sim, latest_summary         = fetch_simulation_data()
-    df_staged                      = fetch_staged_csv(GITHUB_TOKEN, DATA_REPO)
-
+    # ── 4. RF 예측 + 부하 경보 ────────────────────────
+    df_sim, latest_summary = fetch_simulation_data()
+    df_staged              = fetch_staged_csv(GITHUB_TOKEN, DATA_REPO)
     import pandas as pd
     df_train = df_sim
     if (df_sim is None or len(df_sim) < 24) and df_staged is not None:
         df_train = df_staged
-
     models, metrics, feature_names = train_models(df_train)
     NX, NY  = get_grid(CITY)
     weather = fetch_current_weather(NX, NY, KMA_API_KEY)
     pred    = predict_load(weather, models, feature_names, latest_summary, now=now)
     status  = pred["status"]
-
     if status in ["warn","danger"]:
         send_telegram(build_alert_message(pred), TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
 
-    # ── 4. 낙뢰 감지 ──────────────────────────────────
+    # ── 5. 낙뢰 감지 ──────────────────────────────────
     lgt_data = fetch_lightning(kma_key=KMA_API_KEY,
                                 kakao_key=os.environ.get("KAKAO_API_KEY",""),
                                 now=now)
@@ -114,7 +125,7 @@ def run_monitor():
         if lgt_msg:
             send_telegram(lgt_msg, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
 
-    # ── 5. 대시보드 업데이트 ───────────────────────────
+    # ── 6. 대시보드 업데이트 ──────────────────────────
     update_dashboard(pred, weather, df_sim, metrics,
                      models, feature_names, df_staged=df_staged)
     print(f"[모니터] {pred['total_load_kw']}kW / {status}")
