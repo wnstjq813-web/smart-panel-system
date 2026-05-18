@@ -1,9 +1,7 @@
 """
 dashboard.py — 대시보드 업데이트 모듈
-수정: df_staged 파라미터 추가
-  - 공개된 시간(df_sim): 실제 데이터 표시
-  - 미공개 시간(df_staged): staged 예측값으로 채움
-  - df_sim이 없거나 부족해도 staged로 대체 → 에러 없이 동작
+수정: 지난 시간(h < now.hour)은 staged 데이터도 actual로 표시
+      수동 실행 시 0~현재시간-1이 예측이 아닌 측정값처럼 표시됨
 """
 import json
 import pandas as pd
@@ -19,7 +17,6 @@ from src.calendar_builder import (get_historical_averages, fetch_forecast_calend
 from src.github_utils import github_push_file
 
 def _row_to_hourly(row, h, hourly_climate):
-    """DataFrame 행 → hourly dict 변환"""
     clm = hourly_climate.get(h, {})
     return {
         "hour":           h,
@@ -37,15 +34,10 @@ def _row_to_hourly(row, h, hourly_climate):
     }
 
 def build_hourly(df_sim, df_staged, now, hourly_climate):
-    """
-    공개된 시간(df_sim) + 미공개 시간(df_staged) 합쳐서 24시간 구성
-    df_sim 없으면 df_staged 전체 사용
-    """
     today_str = now.strftime("%Y-%m-%d")
-    released  = {}   # hour → row
-    staged    = {}   # hour → row
+    released  = {}
+    staged    = {}
 
-    # 공개된 오늘 데이터
     if df_sim is not None and len(df_sim) > 0:
         df_today = df_sim[df_sim["datetime"].astype(str).str.startswith(today_str)]
         for _, row in df_today.iterrows():
@@ -54,7 +46,6 @@ def build_hourly(df_sim, df_staged, now, hourly_climate):
             r["_data_type"] = "actual"
             released[h] = r
 
-    # staged 데이터 (미공개 시간 채우기용)
     if df_staged is not None and len(df_staged) > 0:
         df_s = df_staged[df_staged["datetime"].astype(str).str.startswith(today_str)]
         for _, row in df_s.iterrows():
@@ -68,8 +59,12 @@ def build_hourly(df_sim, df_staged, now, hourly_climate):
         if h in released:
             hourly.append(_row_to_hourly(released[h], h, hourly_climate))
         elif h in staged:
-            hourly.append(_row_to_hourly(staged[h], h, hourly_climate))
-        # 둘 다 없으면 해당 시간 건너뜀 (대시보드가 빈 칸으로 처리)
+            r = dict(staged[h])
+            # [수정] 이미 지난 시간은 staged여도 actual로 표시
+            # 수동 실행 시 0~(현재-1)시는 이미 발생한 데이터이므로 예측 표시 불필요
+            if h < now.hour:
+                r["_data_type"] = "actual"
+            hourly.append(_row_to_hourly(r, h, hourly_climate))
 
     return hourly
 
@@ -77,36 +72,29 @@ def build_dashboard_data(prediction, weather, df_sim, metrics,
                           models, feature_names, df_staged=None):
     now = now_kst()
 
-    # 낙뢰
     lgt_data    = fetch_lightning(kma_key=KMA_API_KEY, kakao_key=KAKAO_API_KEY, now=now)
     lgt_summary = summarize_lightning(lgt_data)
 
-    # 시간별 기후
     NX, NY         = get_grid(CITY)
     hourly_climate = fetch_hourly_climate(KMA_API_KEY, NX, NY)
     hourly_climate = fill_missing_hours(hourly_climate)
 
-    # hourly 구성 (실제 + staged 혼합)
     hourly = build_hourly(df_sim, df_staged, now, hourly_climate)
 
     # 사고 이력 — 현재 시각 이전 행만 (미래 staged 제외)
     accident_log = []
-    # df_sim(누적) + df_staged(오늘 공개분) 합치되 현재 시각까지만
     acc_frames = []
     if df_sim is not None and len(df_sim) > 0:
         acc_frames.append(df_sim)
     if df_staged is not None and len(df_staged) > 0:
-        # staged 중 오늘 현재 시각 이전 행만 포함
         df_s = df_staged.copy()
         df_s["_dt"] = pd.to_datetime(df_s["datetime"])
         df_s = df_s[df_s["_dt"] <= now.replace(minute=59, second=59)].drop(columns=["_dt"])
         if len(df_s) > 0:
             acc_frames.append(df_s)
-
     if acc_frames:
         df_acc_src = pd.concat(acc_frames, ignore_index=True).drop_duplicates("datetime")
         df_acc_src["_dt"] = pd.to_datetime(df_acc_src["datetime"])
-        # 현재 시각 이전 + 사고 있는 행만
         df_acc_src = df_acc_src[
             (df_acc_src["accident_type"] != "none") &
             (df_acc_src["_dt"] <= now.replace(minute=59, second=59))
@@ -119,7 +107,6 @@ def build_dashboard_data(prediction, weather, df_sim, metrics,
                 "circuit":  str(row.get("accident_circuit", "-")),
             })
 
-    # 달력 생성
     hist       = get_historical_averages(df_sim)
     fc_this    = fetch_forecast_calendar(NX, NY, KMA_API_KEY, now.year, now.month)
     cal_this   = build_calendar(now.year, now.month, fc_this, hist,
