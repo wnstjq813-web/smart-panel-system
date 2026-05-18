@@ -3,7 +3,9 @@ name: 시뮬레이터 실행
 on:
   push:
     paths:
-      - 'config/config.json'
+      - 'config/config.json'   # Streamlit 버튼 → 수동 실행
+  schedule:
+    - cron: '30 15 * * *'      # 매일 KST 00:30 자동 실행 (UTC 15:30)
 
 jobs:
   simulate:
