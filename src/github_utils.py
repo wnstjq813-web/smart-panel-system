@@ -428,3 +428,72 @@ def release_hourly_row(hour=None, token=None, repo=None):
         acc = row_dict.get("accident_type","none")
         print(f"[Staged] {today_str} {hour:02d}시 공개 완료 | 사고: {acc}")
     return row_dict if ok else None
+
+def backfill_rows_bulk(token=None, repo=None):
+    """
+    staged CSV에서 오늘 0 ~ (현재시간-1) 행을 한 번에 읽어
+    panel_simulation.csv에 일괄 append 후 GitHub에 1번만 push
+    API 호출 2번 (읽기 1 + 쓰기 1)으로 완료
+    반환값: 추가된 행 수
+    """
+    token     = token or GITHUB_TOKEN
+    repo      = repo  or DATA_REPO
+    now       = now_kst()
+    today_str = now.strftime("%Y-%m-%d")
+
+    if now.hour == 0:
+        print("[Backfill] 자정 — backfill 불필요")
+        return 0
+
+    # staged 읽기 (API 1번)
+    df_staged = fetch_staged_csv(token, repo)
+    if df_staged is None:
+        print("[Backfill] staged CSV 없음 — 건너뜀")
+        return 0
+
+    # 오늘 0 ~ (현재시간-1) 행 추출
+    df_staged["_dt"]   = pd.to_datetime(df_staged["datetime"])
+    df_staged["_hour"] = df_staged["_dt"].dt.hour
+    df_staged["_date"] = df_staged["_dt"].dt.strftime("%Y-%m-%d")
+    df_past = df_staged[
+        (df_staged["_date"] == today_str) &
+        (df_staged["_hour"] < now.hour)
+    ].drop(columns=["_dt","_hour","_date"])
+
+    if len(df_past) == 0:
+        print("[Backfill] 공개할 과거 행 없음")
+        return 0
+
+    # 기존 누적 CSV 읽기 (API 1번)
+    existing_content = github_get_file("data/panel_simulation.csv", token, repo)
+    if existing_content:
+        try:
+            existing_df  = pd.read_csv(io.StringIO(existing_content))
+            existing_dts = set(existing_df["datetime"].astype(str))
+            df_new = df_past[~df_past["datetime"].astype(str).isin(existing_dts)]
+            if len(df_new) == 0:
+                print("[Backfill] 모든 행 이미 존재 — 스킵")
+                return 0
+            merged_df = pd.concat([existing_df, df_new], ignore_index=True)
+            print(f"[Backfill] 신규 {len(df_new)}행 추가 (기존 {len(existing_df)}행)")
+        except Exception as e:
+            print(f"[Backfill] 병합 실패: {e} → 신규만 사용")
+            merged_df = df_past
+            df_new    = df_past
+    else:
+        merged_df = df_past
+        df_new    = df_past
+        print(f"[Backfill] 기존 없음 → {len(df_past)}행 최초 저장")
+
+    merged_df = merged_df.sort_values("datetime").reset_index(drop=True)
+    ok = github_push_file(
+        content_str=merged_df.to_csv(index=False, encoding="utf-8-sig"),
+        repo_path="data/panel_simulation.csv",
+        commit_msg=f"[Backfill] {today_str} 0~{now.hour-1}시 일괄 ({len(df_new)}행)",
+        token=token, repo=repo,
+    )
+    if ok:
+        print(f"[Backfill] 완료 — {len(df_new)}행 추가 (API 2회)")
+        return len(df_new)
+    print("[Backfill] push 실패")
+    return 0
