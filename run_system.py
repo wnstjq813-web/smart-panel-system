@@ -1,13 +1,14 @@
 """
 run_system.py — 스마트 분전반 시스템 실행 진입점
-수정: workflow_run(시뮬레이터 완료) 시 지난 시간 backfill 추가
+수정: backfill → backfill_rows_bulk() 사용 (API 2회로 단축)
 """
 import os
 from src.config import (CITY, KMA_API_KEY, GITHUB_TOKEN,
                          TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, now_kst)
 from src.kma_weather import get_grid, fetch_current_weather
 from src.github_utils import (fetch_simulation_data, update_asos_cache_daily,
-                               fetch_staged_csv, release_hourly_row, DATA_REPO)
+                               fetch_staged_csv, release_hourly_row,
+                               backfill_rows_bulk, DATA_REPO)
 from src.ml_trainer import train_models
 from src.predictor import predict_load
 from src.telegram_bot import (send_telegram, build_daily_report,
@@ -16,22 +17,7 @@ from src.lightning import fetch_lightning, build_lightning_alert
 from src.dashboard import update_dashboard
 
 MODE       = os.environ.get("RUN_MODE", "monitor")
-EVENT_NAME = os.environ.get("GITHUB_EVENT_NAME", "")  # workflow_run 감지
-
-def backfill_past_hours(now):
-    """
-    시뮬레이터 완료 후 호출 — 0 ~ (현재시간-1) 중 누락된 행을 일괄 공개
-    수동 실행 시 아침에 돌리면 0~9시 데이터가 없는 문제 해결
-    """
-    if now.hour == 0:
-        return  # 자정에는 backfill 불필요
-    print(f"\n[Backfill] 0~{now.hour-1}시 누락 행 확인 중...")
-    filled = 0
-    for h in range(0, now.hour):
-        result = release_hourly_row(hour=h, token=GITHUB_TOKEN, repo=DATA_REPO)
-        if result:
-            filled += 1
-    print(f"[Backfill] 완료 — {filled}개 행 추가")
+EVENT_NAME = os.environ.get("GITHUB_EVENT_NAME", "")
 
 def run_daily():
     now = now_kst()
@@ -81,13 +67,15 @@ def run_report():
 
 def run_monitor():
     now        = now_kst()
-    is_sim_run = (EVENT_NAME == "workflow_run")  # 시뮬레이터 완료로 트리거됐는지
+    is_sim_run = (EVENT_NAME == "workflow_run")
     print(f"\n[모니터] {now.strftime('%Y-%m-%d %H:%M')} KST "
           f"{'(시뮬레이터 완료 트리거)' if is_sim_run else ''}")
 
-    # ── 1. 지난 시간 backfill (시뮬레이터 완료 시에만) ──
+    # ── 1. 지난 시간 일괄 backfill (시뮬레이터 완료 시에만) ──
+    # [수정] 1행씩 반복 → 한 번에 bulk push (API 2회)
     if is_sim_run:
-        backfill_past_hours(now)
+        added = backfill_rows_bulk(token=GITHUB_TOKEN, repo=DATA_REPO)
+        print(f"[Backfill] {added}행 일괄 추가 완료")
 
     # ── 2. 현재 시간 행 공개 ──────────────────────────
     released = release_hourly_row(hour=now.hour, token=GITHUB_TOKEN, repo=DATA_REPO)
