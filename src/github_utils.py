@@ -366,134 +366,67 @@ def fetch_staged_csv(token=None, repo=None):
 
 def release_hourly_row(hour=None, token=None, repo=None):
     """
-    staged CSV에서 현재 시간(hour) 행을 꺼내
-    panel_simulation.csv(누적)에 append 후 GitHub push
-    반환값: 해당 행 dict (사고 정보 포함) | None
-    """
-    token = token or GITHUB_TOKEN
-    repo  = repo  or DATA_REPO
-    now   = now_kst()
-    if hour is None:
-        hour = now.hour
-
-    # staged 읽기
-    df_staged = fetch_staged_csv(token, repo)
-    if df_staged is None:
-        return None
-
-    # 오늘 날짜 + 해당 시간 행 찾기
-    today_str = now.strftime("%Y-%m-%d")
-    df_staged["_dt"]   = pd.to_datetime(df_staged["datetime"])
-    df_staged["_hour"] = df_staged["_dt"].dt.hour
-    df_staged["_date"] = df_staged["_dt"].dt.strftime("%Y-%m-%d")
-
-    row_df = df_staged[
-        (df_staged["_date"] == today_str) &
-        (df_staged["_hour"] == hour)
-    ].drop(columns=["_dt","_hour","_date"])
-
-    if len(row_df) == 0:
-        print(f"[Staged] {today_str} {hour:02d}시 행 없음")
-        return None
-
-    row_dict = row_df.iloc[0].to_dict()
-
-    # 기존 누적 CSV 읽기
-    existing_content = github_get_file("data/panel_simulation.csv", token, repo)
-    if existing_content:
-        try:
-            existing_df = pd.read_csv(io.StringIO(existing_content))
-            # 이미 해당 datetime이 있으면 스킵
-            target_dt = row_dict.get("datetime","")
-            if "datetime" in existing_df.columns and (existing_df["datetime"] == target_dt).any():
-                print(f"[Staged] {target_dt} 이미 존재 — 스킵")
-                return row_dict
-            merged_df = pd.concat([existing_df, row_df], ignore_index=True)
-        except Exception as e:
-            print(f"[Staged] 기존 CSV 병합 실패: {e}")
-            merged_df = row_df
-    else:
-        merged_df = row_df
-
-    merged_df = merged_df.sort_values("datetime").reset_index(drop=True)
-    csv_out   = merged_df.to_csv(index=False, encoding="utf-8-sig")
-
-    ok = github_push_file(
-        content_str=csv_out,
-        repo_path="data/panel_simulation.csv",
-        commit_msg=f"[모니터] {today_str} {hour:02d}시 행 공개",
-        token=token, repo=repo,
-    )
-    if ok:
-        acc = row_dict.get("accident_type","none")
-        print(f"[Staged] {today_str} {hour:02d}시 공개 완료 | 사고: {acc}")
-    return row_dict if ok else None
-
-def backfill_rows_bulk(token=None, repo=None):
-    """
-    staged CSV에서 오늘 0 ~ (현재시간-1) 행을 한 번에 읽어
-    panel_simulation.csv에 일괄 append 후 GitHub에 1번만 push
-    API 호출 2번 (읽기 1 + 쓰기 1)으로 완료
-    반환값: 추가된 행 수
+    staged CSV에서 0 ~ hour 중 누락된 행을 모두 공개
+    [수정] 현재 시간 1행 → 0~현재시간 누락분 전체
+    Actions cron skip돼도 다음 실행 시 자동 복구
+    반환값: 현재 시간 행 dict | None
     """
     token     = token or GITHUB_TOKEN
     repo      = repo  or DATA_REPO
     now       = now_kst()
+    if hour is None:
+        hour = now.hour
     today_str = now.strftime("%Y-%m-%d")
 
-    if now.hour == 0:
-        print("[Backfill] 자정 — backfill 불필요")
-        return 0
-
-    # staged 읽기 (API 1번)
     df_staged = fetch_staged_csv(token, repo)
     if df_staged is None:
-        print("[Backfill] staged CSV 없음 — 건너뜀")
-        return 0
+        print(f"[Release] staged CSV 없음")
+        return None
 
-    # 오늘 0 ~ (현재시간-1) 행 추출
     df_staged["_dt"]   = pd.to_datetime(df_staged["datetime"])
     df_staged["_hour"] = df_staged["_dt"].dt.hour
     df_staged["_date"] = df_staged["_dt"].dt.strftime("%Y-%m-%d")
-    df_past = df_staged[
+
+    # 오늘 0 ~ hour 행 전체 추출 (누락분 자동 복구)
+    df_today = df_staged[
         (df_staged["_date"] == today_str) &
-        (df_staged["_hour"] < now.hour)
+        (df_staged["_hour"] <= hour)
     ].drop(columns=["_dt","_hour","_date"])
 
-    if len(df_past) == 0:
-        print("[Backfill] 공개할 과거 행 없음")
-        return 0
+    if len(df_today) == 0:
+        print(f"[Release] {today_str} 0~{hour:02d}시 staged 없음")
+        return None
 
-    # 기존 누적 CSV 읽기 (API 1번)
     existing_content = github_get_file("data/panel_simulation.csv", token, repo)
     if existing_content:
         try:
             existing_df  = pd.read_csv(io.StringIO(existing_content))
             existing_dts = set(existing_df["datetime"].astype(str))
-            df_new = df_past[~df_past["datetime"].astype(str).isin(existing_dts)]
+            df_new = df_today[~df_today["datetime"].astype(str).isin(existing_dts)]
             if len(df_new) == 0:
-                print("[Backfill] 모든 행 이미 존재 — 스킵")
-                return 0
+                print(f"[Release] 0~{hour:02d}시 모두 존재 — 스킵")
+                cur = df_today[df_today["datetime"].astype(str).str[11:13] == f"{hour:02d}"]
+                return cur.iloc[0].to_dict() if len(cur) > 0 else None
             merged_df = pd.concat([existing_df, df_new], ignore_index=True)
-            print(f"[Backfill] 신규 {len(df_new)}행 추가 (기존 {len(existing_df)}행)")
+            print(f"[Release] {len(df_new)}행 추가 (0~{hour:02d}시 누락분)")
         except Exception as e:
-            print(f"[Backfill] 병합 실패: {e} → 신규만 사용")
-            merged_df = df_past
-            df_new    = df_past
+            print(f"[Release] 병합 실패: {e}")
+            merged_df = df_today
+            df_new    = df_today
     else:
-        merged_df = df_past
-        df_new    = df_past
-        print(f"[Backfill] 기존 없음 → {len(df_past)}행 최초 저장")
+        merged_df = df_today
+        df_new    = df_today
 
     merged_df = merged_df.sort_values("datetime").reset_index(drop=True)
     ok = github_push_file(
         content_str=merged_df.to_csv(index=False, encoding="utf-8-sig"),
         repo_path="data/panel_simulation.csv",
-        commit_msg=f"[Backfill] {today_str} 0~{now.hour-1}시 일괄 ({len(df_new)}행)",
+        commit_msg=f"[모니터] {today_str} 0~{hour:02d}시 ({len(df_new)}행 추가)",
         token=token, repo=repo,
     )
     if ok:
-        print(f"[Backfill] 완료 — {len(df_new)}행 추가 (API 2회)")
-        return len(df_new)
-    print("[Backfill] push 실패")
-    return 0
+        print(f"[Release] 완료 — 누적 {len(merged_df)}행")
+
+    cur = df_today[df_today["datetime"].astype(str).str[11:13] == f"{hour:02d}"]
+    return cur.iloc[0].to_dict() if len(cur) > 0 else None
+
