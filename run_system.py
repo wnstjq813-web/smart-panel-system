@@ -1,14 +1,14 @@
 """
 run_system.py — 스마트 분전반 시스템 실행 진입점
-수정: backfill → backfill_rows_bulk() 사용 (API 2회로 단축)
+수정: backfill import 제거 (release_hourly_row가 통합 처리)
+     (release_hourly_row가 0~현재시간 전체 처리로 역할 흡수됨)
 """
 import os
 from src.config import (CITY, KMA_API_KEY, GITHUB_TOKEN,
                          TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, now_kst)
 from src.kma_weather import get_grid, fetch_current_weather
 from src.github_utils import (fetch_simulation_data, update_asos_cache_daily,
-                               fetch_staged_csv, release_hourly_row,
-                               backfill_rows_bulk, DATA_REPO)
+                               fetch_staged_csv, release_hourly_row, DATA_REPO)
 from src.ml_trainer import train_models
 from src.predictor import predict_load
 from src.telegram_bot import (send_telegram, build_daily_report,
@@ -71,16 +71,10 @@ def run_monitor():
     print(f"\n[모니터] {now.strftime('%Y-%m-%d %H:%M')} KST "
           f"{'(시뮬레이터 완료 트리거)' if is_sim_run else ''}")
 
-    # ── 1. 지난 시간 일괄 backfill (시뮬레이터 완료 시에만) ──
-    # [수정] 1행씩 반복 → 한 번에 bulk push (API 2회)
-    if is_sim_run:
-        added = backfill_rows_bulk(token=GITHUB_TOKEN, repo=DATA_REPO)
-        print(f"[Backfill] {added}행 일괄 추가 완료")
-
-    # ── 2. 현재 시간 행 공개 ──────────────────────────
+    # ── 1. 현재 시간 행 공개 (0~현재시간 누락분 자동 포함) ──
     released = release_hourly_row(hour=now.hour, token=GITHUB_TOKEN, repo=DATA_REPO)
 
-    # ── 3. 사고 알림 ──────────────────────────────────
+    # ── 2. 사고 알림 ──────────────────────────────────
     if released:
         acc = released.get("accident_type", "none")
         sev = released.get("accident_severity", "none")
@@ -89,7 +83,7 @@ def run_monitor():
             send_telegram(msg, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
             print(f"[사고 알림] {acc} / {sev}")
 
-    # ── 4. RF 예측 + 부하 경보 ────────────────────────
+    # ── 3. RF 예측 + 부하 경보 ────────────────────────
     df_sim, latest_summary = fetch_simulation_data()
     df_staged              = fetch_staged_csv(GITHUB_TOKEN, DATA_REPO)
     import pandas as pd
@@ -104,7 +98,7 @@ def run_monitor():
     if status in ["warn","danger"]:
         send_telegram(build_alert_message(pred), TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
 
-    # ── 5. 낙뢰 감지 ──────────────────────────────────
+    # ── 4. 낙뢰 감지 ──────────────────────────────────
     lgt_data = fetch_lightning(kma_key=KMA_API_KEY,
                                 kakao_key=os.environ.get("KAKAO_API_KEY",""),
                                 now=now)
@@ -113,7 +107,7 @@ def run_monitor():
         if lgt_msg:
             send_telegram(lgt_msg, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
 
-    # ── 6. 대시보드 업데이트 ──────────────────────────
+    # ── 5. 대시보드 업데이트 ──────────────────────────
     update_dashboard(pred, weather, df_sim, metrics,
                      models, feature_names, df_staged=df_staged)
     print(f"[모니터] {pred['total_load_kw']}kW / {status}")
