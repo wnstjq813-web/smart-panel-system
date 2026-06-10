@@ -142,18 +142,42 @@ def fetch_dashboard_json() -> dict | None:
     except:
         return None
 
+@st.cache_data(ttl=120)
+def fetch_staged_csv() -> pd.DataFrame | None:
+    url  = f"https://api.github.com/repos/{DATA_REPO}/contents/data/panel_staged.csv"
+    resp = requests.get(url, headers=_gh_headers())
+    if resp.status_code != 200: return None
+    try:
+        content = base64.b64decode(resp.json().get("content","")).decode("utf-8-sig")
+        return pd.read_csv(io.StringIO(content))
+    except:
+        return None
+
+@st.cache_data(ttl=120)
+def fetch_asos_cache() -> dict | None:
+    url  = f"https://api.github.com/repos/{DATA_REPO}/contents/data/asos_climate.json"
+    resp = requests.get(url, headers=_gh_headers())
+    if resp.status_code != 200: return None
+    try:
+        return json.loads(
+            base64.b64decode(resp.json().get("content","")).decode("utf-8-sig")
+        )
+    except:
+        return None
+
 # ════════════════════════════════════════════════════════
 # UI
 # ════════════════════════════════════════════════════════
 st.title("⚡ 스마트 분전반 시뮬레이터")
 st.caption("파라미터를 설정하고 실행 버튼을 누르면 GitHub Actions가 자동으로 시뮬레이션을 시작합니다.")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "🚀 시뮬레이터 실행",
     "📝 실행 로그",
     "📊 데이터 시각화",
     "📋 Actions 상태",
     "🗄️ 데이터 현황",
+    "✅ 일일 진단",
 ])
 
 # ════════════════════════════════════════════════════════
@@ -986,3 +1010,237 @@ with tab5:
 
         for action in actions:
             st.markdown(f"- {action}")
+
+
+# ════════════════════════════════════════════════════════
+# TAB 6 — 일일 진단 (자동 체크리스트)
+# ════════════════════════════════════════════════════════
+with tab6:
+    st.subheader("✅ 일일 코드 정상 작동 진단")
+    st.caption("매일 8개 항목을 자동 점검합니다. 하나라도 실패하면 원인과 조치를 안내합니다.")
+
+    col_rd, _ = st.columns([1, 5])
+    with col_rd:
+        if st.button("🔄 진단 새로고침", key="diag_refresh"):
+            st.cache_data.clear()
+
+    from datetime import timedelta
+
+    with st.spinner("데이터 수집 중..."):
+        df_sim   = fetch_csv()
+        df_stg   = fetch_staged_csv()
+        dash_d   = fetch_dashboard_json()
+        asos_d   = fetch_asos_cache()
+
+    now_dt    = datetime.now()
+    today     = now_dt.date()
+    yesterday = today - timedelta(days=1)
+    today_s   = today.strftime("%Y-%m-%d")
+    yest_s    = yesterday.strftime("%Y-%m-%d")
+
+    # 진단 결과 누적 리스트: (항목, 상태, 메시지, 조치)
+    checks = []
+
+    # ── 체크 1: 시뮬레이터 실행 (오늘 staged 24행) ──
+    if df_stg is not None and "datetime" in df_stg.columns:
+        stg_today = df_stg[df_stg["datetime"].astype(str).str.startswith(today_s)]
+        n = len(stg_today)
+        if n == 24:
+            checks.append(("시뮬레이터 실행", "pass",
+                           f"오늘 staged {n}행 정상 생성", ""))
+        elif n > 0:
+            checks.append(("시뮬레이터 실행", "warn",
+                           f"오늘 staged {n}행 (24행 미만)",
+                           "시뮬레이터가 중간에 실패했을 수 있음 — Actions 로그 확인"))
+        else:
+            checks.append(("시뮬레이터 실행", "fail",
+                           "오늘 staged 데이터 없음",
+                           "run_simulator 미실행 — cron(KST 00:15) 또는 Streamlit 수동 실행 필요"))
+    else:
+        checks.append(("시뮬레이터 실행", "fail",
+                       "panel_staged.csv 읽기 실패",
+                       "smart-panel-data 저장소 또는 토큰 권한 확인"))
+
+    # ── 체크 2: 데이터 누적 (어제 24행) ──
+    if df_sim is not None and "datetime" in df_sim.columns:
+        sim_yest = df_sim[df_sim["datetime"].astype(str).str.startswith(yest_s)]
+        n = len(sim_yest)
+        if n == 24:
+            checks.append(("데이터 누적", "pass",
+                           f"어제({yest_s}) {n}행 완전 적재", ""))
+        elif n > 0:
+            checks.append(("데이터 누적", "warn",
+                           f"어제 {n}행만 적재 (24행 미만)",
+                           "일부 monitor 실행 skip — 다음 monitor에서 자동 복구 시도됨"))
+        else:
+            checks.append(("데이터 누적", "fail",
+                           f"어제({yest_s}) 데이터 0행",
+                           "release_hourly_row 미작동 또는 staged 누락 — run_system.py import 오류 확인"))
+    else:
+        checks.append(("데이터 누적", "fail",
+                       "panel_simulation.csv 읽기 실패",
+                       "데이터 저장소 또는 토큰 확인"))
+
+    # ── 체크 3: 행 누락 (어제 0~23시 전부) ──
+    if df_sim is not None and "datetime" in df_sim.columns:
+        sim_yest = df_sim[df_sim["datetime"].astype(str).str.startswith(yest_s)]
+        if len(sim_yest) > 0:
+            hours = set(pd.to_datetime(sim_yest["datetime"]).dt.hour)
+            missing = sorted(set(range(24)) - hours)
+            if not missing:
+                checks.append(("행 누락 점검", "pass",
+                               "어제 0~23시 모두 존재", ""))
+            else:
+                checks.append(("행 누락 점검", "warn",
+                               f"누락 시간 {len(missing)}개: {missing}",
+                               "cron skip으로 누락 — release_hourly_row 날짜필터 수정 적용 여부 확인"))
+        else:
+            checks.append(("행 누락 점검", "fail",
+                           "어제 데이터 없어 점검 불가", "체크2 먼저 해결"))
+    else:
+        checks.append(("행 누락 점검", "fail", "CSV 읽기 실패", "데이터 저장소 확인"))
+
+    # ── 체크 4: 사고 비율 (15~25%) ──
+    if df_sim is not None and "accident_type" in df_sim.columns and len(df_sim) > 0:
+        acc_ratio = (df_sim["accident_type"] != "none").sum() / len(df_sim) * 100
+        if 10 <= acc_ratio <= 35:
+            checks.append(("사고 비율", "pass",
+                           f"사고 발생 {acc_ratio:.1f}% (정상 범위)", ""))
+        elif acc_ratio > 35:
+            checks.append(("사고 비율", "warn",
+                           f"사고 발생 {acc_ratio:.1f}% (과다)",
+                           "LLM 프롬프트 사고 빈도 규칙 미적용 — llm_simulator.py 확인. 단 과거 누적분 영향일 수 있음"))
+        else:
+            checks.append(("사고 비율", "warn",
+                           f"사고 발생 {acc_ratio:.1f}% (과소)",
+                           "사고 확률 계산 점검 (정상이면 무시 가능)"))
+    else:
+        checks.append(("사고 비율", "fail", "사고 데이터 없음", "데이터 확인"))
+
+    # ── 체크 5: 부하값 다양성 (5연속 동일 없음) ──
+    if df_sim is not None and "total_load_kw" in df_sim.columns and len(df_sim) >= 5:
+        vals = df_sim["total_load_kw"].values
+        max_rep, rep = 1, 1
+        for i in range(1, len(vals)):
+            if abs(vals[i] - vals[i-1]) < 0.001:
+                rep += 1
+                max_rep = max(max_rep, rep)
+            else:
+                rep = 1
+        if max_rep < 5:
+            checks.append(("부하값 다양성", "pass",
+                           f"최대 연속 동일값 {max_rep}개 (정상)", ""))
+        else:
+            checks.append(("부하값 다양성", "warn",
+                           f"{max_rep}개 연속 동일값 발견",
+                           "LLM 변동성 지침 미적용 — llm_simulator.py prev_load_kw·temperature 확인. 과거 누적분 영향 가능"))
+    else:
+        checks.append(("부하값 다양성", "fail", "데이터 부족", "데이터 확인"))
+
+    # ── 체크 6: 대시보드 갱신 (6시간 이내) ──
+    if dash_d and dash_d.get("updated_at"):
+        try:
+            upd = datetime.fromisoformat(dash_d["updated_at"].replace("Z",""))
+            diff_h = (now_dt - upd).total_seconds() / 3600
+            if diff_h <= 6:
+                checks.append(("대시보드 갱신", "pass",
+                               f"{diff_h:.1f}시간 전 갱신", ""))
+            elif diff_h <= 24:
+                checks.append(("대시보드 갱신", "warn",
+                               f"{diff_h:.1f}시간 전 갱신 (지연)",
+                               "monitor 실행 빈도 확인 (정상 운영 시 매시간 갱신)"))
+            else:
+                checks.append(("대시보드 갱신", "fail",
+                               f"{diff_h/24:.1f}일 전 갱신 (정지)",
+                               "run_system 실행 실패 — Actions 로그 ImportError·토큰 오류 확인"))
+        except:
+            checks.append(("대시보드 갱신", "warn", "갱신 시각 파싱 실패", "dashboard_data.json 확인"))
+    else:
+        checks.append(("대시보드 갱신", "fail",
+                       "dashboard_data.json 없음",
+                       "smart-panel 저장소 push 실패 — 토큰 권한 확인"))
+
+    # ── 체크 7: RF 학습 (R² 존재) ──
+    if dash_d and dash_d.get("model_metrics", {}).get("total_load_kw"):
+        r2 = dash_d["model_metrics"]["total_load_kw"].get("r2")
+        if r2 is not None:
+            grade = "우수" if r2>=0.9 else "양호" if r2>=0.75 else "보통" if r2>=0.5 else "낮음"
+            status = "pass" if r2 >= 0.5 else "warn"
+            checks.append(("RF 학습", status,
+                           f"R² = {r2:.4f} ({grade})",
+                           "" if r2>=0.5 else "데이터 누적 부족 — 30일+ 쌓이면 개선"))
+        else:
+            checks.append(("RF 학습", "warn", "R² 측정값 없음", "학습 데이터 부족"))
+    else:
+        checks.append(("RF 학습", "fail",
+                       "model_metrics 없음",
+                       "RF 학습 미실행 — daily 파이프라인 확인"))
+
+    # ── 체크 8: ASOS 캐시 (오늘 갱신) ──
+    if asos_d and asos_d.get("last_updated"):
+        last_upd = asos_d["last_updated"]
+        if last_upd == today_s:
+            checks.append(("ASOS 캐시", "pass",
+                           f"오늘({last_upd}) 갱신 완료", ""))
+        else:
+            try:
+                lu = datetime.strptime(last_upd, "%Y-%m-%d").date()
+                gap = (today - lu).days
+                if gap <= 2:
+                    checks.append(("ASOS 캐시", "pass",
+                                   f"{last_upd} 갱신 ({gap}일 전, 정상)", ""))
+                else:
+                    checks.append(("ASOS 캐시", "warn",
+                                   f"{last_upd} 갱신 ({gap}일 전)",
+                                   "daily 파이프라인 ASOS 업데이트 단계 확인"))
+            except:
+                checks.append(("ASOS 캐시", "warn", f"{last_upd}", ""))
+    else:
+        checks.append(("ASOS 캐시", "fail",
+                       "asos_climate.json 없음",
+                       "최초 ASOS 수집 미완료 — daily 실행 시 자동 생성"))
+
+    # ── 종합 점수 ──
+    n_pass = sum(1 for _,s,_,_ in checks if s == "pass")
+    n_warn = sum(1 for _,s,_,_ in checks if s == "warn")
+    n_fail = sum(1 for _,s,_,_ in checks if s == "fail")
+    total  = len(checks)
+
+    st.divider()
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("종합 점수", f"{n_pass}/{total}")
+    c2.metric("✅ 정상", f"{n_pass}개")
+    c3.metric("⚠️ 주의", f"{n_warn}개")
+    c4.metric("❌ 실패", f"{n_fail}개")
+
+    # 전체 상태 배너
+    if n_fail > 0:
+        st.error(f"🔴 {n_fail}개 항목 실패 — 즉시 조치 필요")
+    elif n_warn > 0:
+        st.warning(f"🟡 {n_warn}개 항목 주의 — 확인 권장")
+    else:
+        st.success("🟢 모든 항목 정상 — 시스템 완벽 작동 중")
+
+    st.divider()
+
+    # ── 체크리스트 상세 ──
+    st.markdown("### 📋 점검 항목 상세")
+    EMOJI = {"pass":"✅", "warn":"⚠️", "fail":"❌"}
+    for i, (name, status, msg, action) in enumerate(checks, 1):
+        emoji = EMOJI[status]
+        with st.expander(f"{emoji} {i}. {name} — {msg}", expanded=(status=="fail")):
+            st.markdown(f"**상태**: {emoji} {status.upper()}")
+            st.markdown(f"**결과**: {msg}")
+            if action:
+                st.markdown(f"**조치**: {action}")
+            else:
+                st.markdown("**조치**: 불필요 (정상)")
+
+    st.divider()
+
+    # ── 진단 요약 다운로드용 텍스트 ──
+    st.markdown("### 📄 진단 요약")
+    summary_lines = [f"[{today_s}] 일일 진단 결과: {n_pass}/{total} 정상"]
+    for i, (name, status, msg, _) in enumerate(checks, 1):
+        summary_lines.append(f"{EMOJI[status]} {i}. {name}: {msg}")
+    st.code("\n".join(summary_lines), language=None)
