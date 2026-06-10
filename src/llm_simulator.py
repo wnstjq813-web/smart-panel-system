@@ -17,6 +17,12 @@ SYSTEM_PROMPT = """당신은 스마트 분전반 전력 시뮬레이터입니다
 - 강제 사고(forced=true)가 명시된 경우에만 반드시 해당 사고를 출력하세요.
 - 결과적으로 전체 시뮬레이션에서 사고 발생 비율은 15~25% 수준이어야 합니다.
 
+【중요 규칙 — 부하값 다양성】
+- 직전 시간 부하(prev_load_kw)가 주어지면, 절대 그 값과 똑같이 출력하지 마세요.
+- 각 회로 부하는 직전 대비 ±10~20% 자연스럽게 변동시키세요.
+- 실제 사무실처럼 매 시간 미세하게 다른 값을 출력하세요 (예: 0.45, 0.52, 0.48).
+- 소수점 셋째 자리까지 현실적인 변동을 주세요. 반올림된 깔끔한 값(0.5, 1.0)만 반복하지 마세요.
+
 출력 형식 (반드시 JSON만, 설명 없이):
 {
   "circuits": {
@@ -76,6 +82,10 @@ def build_prompt(ctx, probs):
     forced_str = (f"\n⚠️ 강제 사고 지정: {forced} (반드시 이 사고 발생으로 출력)\n"
                   if forced != "none" else "")
 
+    prev_kw  = ctx.get("prev_load_kw", 0)
+    prev_str = (f"- 직전 시간 총부하: {prev_kw}kW (이 값과 다르게, ±10~20% 변동시킬 것)\n"
+                if prev_kw and prev_kw > 0 else "")
+
     return (
         f"현재 상황:\n"
         f"- 날씨: {ctx['temperature']}°C / 습도 {ctx['humidity']}% / {ctx['weather_code']}\n"
@@ -85,10 +95,11 @@ def build_prompt(ctx, probs):
         f"- 재실률: {ctx['occupancy_rate']*100:.0f}%\n"
         f"- 설비노후: {ctx['equipment_age_years']}년\n"
         f"- 낙뢰: {'감지됨' if ctx.get('is_thunder') else '없음'}\n"
+        f"{prev_str}"
         f"{forced_str}\n"
         f"사고 발생 확률 (낮을수록 정상일 가능성 높음):\n{prob_str}\n\n"
         f"위 조건에 맞는 9개 회로 전력 부하(kW)와 사고 여부를 JSON으로 출력하세요.\n"
-        f"확률이 대부분 낮으면 accident_type은 반드시 'none'으로 출력하세요."
+        f"각 회로는 직전 시간과 다른 현실적인 값으로, 확률이 대부분 낮으면 accident_type은 반드시 'none'으로 출력하세요."
     )
 
 
@@ -128,6 +139,7 @@ def call_llm(prompt):
         msg = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=1024,
+            temperature=1.0,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
         )

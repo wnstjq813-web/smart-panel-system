@@ -366,9 +366,9 @@ def fetch_staged_csv(token=None, repo=None):
 
 def release_hourly_row(hour=None, token=None, repo=None):
     """
-    staged CSV에서 0 ~ hour 중 누락된 행을 모두 공개
-    [수정] 현재 시간 1행 → 0~현재시간 누락분 전체
-    Actions cron skip돼도 다음 실행 시 자동 복구
+    staged CSV의 모든 미공개 행을 누적 CSV에 추가
+    [수정] '오늘 날짜'만 처리 → staged 전체 미공개분 처리
+    23시 행이 skip돼도 다음날 00:30(staged 덮어쓰기 전) 자동 복구
     반환값: 현재 시간 행 dict | None
     """
     token     = token or GITHUB_TOKEN
@@ -384,17 +384,18 @@ def release_hourly_row(hour=None, token=None, repo=None):
         return None
 
     df_staged["_dt"]   = pd.to_datetime(df_staged["datetime"])
-    df_staged["_hour"] = df_staged["_dt"].dt.hour
     df_staged["_date"] = df_staged["_dt"].dt.strftime("%Y-%m-%d")
+    df_staged["_hour"] = df_staged["_dt"].dt.hour
 
-    # 오늘 0 ~ hour 행 전체 추출 (누락분 자동 복구)
-    df_today = df_staged[
-        (df_staged["_date"] == today_str) &
-        (df_staged["_hour"] <= hour)
-    ].drop(columns=["_dt","_hour","_date"])
+    # [수정] staged 전체에서 "현재 시각 이전" 모든 행 추출 (날짜 무관)
+    # 단, 오늘 날짜는 현재 시간까지만 / 과거 날짜는 전부 공개
+    now_dt = now.replace(minute=59, second=59, microsecond=0)
+    df_release = df_staged[df_staged["_dt"] <= now_dt].drop(
+        columns=["_dt","_date","_hour"]
+    )
 
-    if len(df_today) == 0:
-        print(f"[Release] {today_str} 0~{hour:02d}시 staged 없음")
+    if len(df_release) == 0:
+        print(f"[Release] 공개할 staged 행 없음")
         return None
 
     existing_content = github_get_file("data/panel_simulation.csv", token, repo)
@@ -402,31 +403,35 @@ def release_hourly_row(hour=None, token=None, repo=None):
         try:
             existing_df  = pd.read_csv(io.StringIO(existing_content))
             existing_dts = set(existing_df["datetime"].astype(str))
-            df_new = df_today[~df_today["datetime"].astype(str).isin(existing_dts)]
+            df_new = df_release[~df_release["datetime"].astype(str).isin(existing_dts)]
             if len(df_new) == 0:
-                print(f"[Release] 0~{hour:02d}시 모두 존재 — 스킵")
-                cur = df_today[df_today["datetime"].astype(str).str[11:13] == f"{hour:02d}"]
+                print(f"[Release] 모든 staged 행 이미 존재 — 스킵")
+                cur = df_release[df_release["datetime"].astype(str).str.startswith(today_str)]
+                cur = cur[cur["datetime"].astype(str).str[11:13] == f"{hour:02d}"]
                 return cur.iloc[0].to_dict() if len(cur) > 0 else None
             merged_df = pd.concat([existing_df, df_new], ignore_index=True)
-            print(f"[Release] {len(df_new)}행 추가 (0~{hour:02d}시 누락분)")
+            print(f"[Release] {len(df_new)}행 추가 (미공개분 일괄)")
         except Exception as e:
             print(f"[Release] 병합 실패: {e}")
-            merged_df = df_today
-            df_new    = df_today
+            merged_df = df_release
+            df_new    = df_release
     else:
-        merged_df = df_today
-        df_new    = df_today
+        merged_df = df_release
+        df_new    = df_release
+        print(f"[Release] 기존 없음 → {len(df_release)}행 최초 저장")
 
     merged_df = merged_df.sort_values("datetime").reset_index(drop=True)
     ok = github_push_file(
         content_str=merged_df.to_csv(index=False, encoding="utf-8-sig"),
         repo_path="data/panel_simulation.csv",
-        commit_msg=f"[모니터] {today_str} 0~{hour:02d}시 ({len(df_new)}행 추가)",
+        commit_msg=f"[모니터] {now.strftime('%Y-%m-%d %H:%M')} ({len(df_new)}행 추가)",
         token=token, repo=repo,
     )
     if ok:
         print(f"[Release] 완료 — 누적 {len(merged_df)}행")
 
-    cur = df_today[df_today["datetime"].astype(str).str[11:13] == f"{hour:02d}"]
+    # 현재 시간 행 반환 (사고 알림용)
+    cur = df_release[df_release["datetime"].astype(str).str.startswith(today_str)]
+    cur = cur[cur["datetime"].astype(str).str[11:13] == f"{hour:02d}"]
     return cur.iloc[0].to_dict() if len(cur) > 0 else None
 
