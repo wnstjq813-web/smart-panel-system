@@ -88,18 +88,30 @@ ACCIDENT_FORMULA = {
 def _gh_headers():
     return {"Authorization": f"token {GITHUB_TOKEN}",
             "Accept": "application/vnd.github.v3+json"}
-
-def push_config(config: dict) -> bool:
+def push_config(config: dict):
+    """성공: True / 실패: 에러 문자열 반환"""
+    if not GITHUB_TOKEN:
+        return "GITHUB_TOKEN 없음 (Streamlit Secrets 확인)"
     url  = f"https://api.github.com/repos/{GITHUB_REPO}/contents/config/config.json"
-    resp = requests.get(url, headers=_gh_headers())
-    sha  = resp.json().get("sha") if resp.status_code == 200 else None
-    b64  = base64.b64encode(
-        json.dumps(config, ensure_ascii=False, indent=2).encode()
-    ).decode()
-    payload = {"message": f"[Streamlit] {config['triggered_at']}", "content": b64}
-    if sha: payload["sha"] = sha
-    r = requests.put(url, headers=_gh_headers(), data=json.dumps(payload))
-    return r.status_code in [200, 201]
+    try:
+        resp = requests.get(url, headers=_gh_headers(), timeout=10)
+        sha  = resp.json().get("sha") if resp.status_code == 200 else None
+        b64  = base64.b64encode(
+            json.dumps(config, ensure_ascii=False, indent=2).encode()
+        ).decode()
+        payload = {"message": f"[Streamlit] {config['triggered_at']}", "content": b64}
+        if sha: payload["sha"] = sha
+        r = requests.put(url, headers=_gh_headers(), data=json.dumps(payload), timeout=10)
+        if r.status_code in [200, 201]:
+            return True
+        try:
+            msg = r.json().get("message", r.text[:150])
+        except:
+            msg = r.text[:150]
+        return f"HTTP {r.status_code} — {msg}"
+    except Exception as e:
+        return f"요청 오류: {str(e)[:150]}"
+
 
 def trigger_workflow(workflow_file: str) -> bool:
     url = (f"https://api.github.com/repos/{GITHUB_REPO}"
@@ -261,18 +273,24 @@ with tab1:
                 "triggered_by":     "streamlit",
                 "triggered_at":     datetime.now().isoformat(),
             }
-            with st.spinner("GitHub에 설정 전송 중..."):
-                ok = push_config(config)
-            if ok:
+    with st.spinner("GitHub에 설정 전송 중..."):
+                result = push_config(config)
+    if result is True:
                 st.success("✅ 전송 완료! Actions가 시뮬레이터를 실행합니다. (약 1~3분 소요)")
-                with st.expander("전송된 설정 확인"):
+    with st.expander("전송된 설정 확인"):
                     st.json(config)
                 st.markdown(
                     f"[🔗 Actions 실행 현황]"
                     f"(https://github.com/{GITHUB_REPO}/actions)"
                 )
             else:
-                st.error("❌ GitHub 전송 실패.")
+                st.error(f"❌ GitHub 전송 실패: {result}")
+                if "403" in str(result):
+                    st.info("💡 토큰 권한 부족 — 새 토큰 발급 시 'repo' 전체 권한을 체크하세요.")
+                elif "404" in str(result):
+                    st.info("💡 저장소를 못 찾음 — GITHUB_REPO 값 또는 토큰의 저장소 접근 권한을 확인하세요.")
+                elif "401" in str(result):
+                    st.info("💡 토큰 인증 실패 — 토큰이 만료됐거나 잘못됐습니다. 새로 발급하세요.")
 
     if report_btn:
         with st.spinner("Actions 트리거 중..."):
