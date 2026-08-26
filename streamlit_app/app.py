@@ -273,11 +273,11 @@ with tab1:
                 "triggered_by":     "streamlit",
                 "triggered_at":     datetime.now().isoformat(),
             }
-    with st.spinner("GitHub에 설정 전송 중..."):
+                with st.spinner("GitHub에 설정 전송 중..."):
                 result = push_config(config)
-    if result is True:
+            if result is True:
                 st.success("✅ 전송 완료! Actions가 시뮬레이터를 실행합니다. (약 1~3분 소요)")
-    with st.expander("전송된 설정 확인"):
+                with st.expander("전송된 설정 확인"):
                     st.json(config)
                 st.markdown(
                     f"[🔗 Actions 실행 현황]"
@@ -290,7 +290,7 @@ with tab1:
                 elif "404" in str(result):
                     st.info("💡 저장소를 못 찾음 — GITHUB_REPO 값 또는 토큰의 저장소 접근 권한을 확인하세요.")
                 elif "401" in str(result):
-                    st.info("💡 토큰 인증 실패 — 토큰이 만료됐거나 잘못됐습니다. 새로 발급하세요.")
+                    st.info("💡 토큰 인증 실패 — 토큰이 만료됐거나 잘못됐습니다. 새로 발급하세요.")  
 
     if report_btn:
         with st.spinner("Actions 트리거 중..."):
