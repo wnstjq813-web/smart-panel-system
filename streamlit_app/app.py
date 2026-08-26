@@ -273,7 +273,7 @@ with tab1:
                 "triggered_by":     "streamlit",
                 "triggered_at":     datetime.now().isoformat(),
             }
-                with st.spinner("GitHub에 설정 전송 중..."):
+            with st.spinner("GitHub에 설정 전송 중..."):
                 result = push_config(config)
             if result is True:
                 st.success("✅ 전송 완료! Actions가 시뮬레이터를 실행합니다. (약 1~3분 소요)")
