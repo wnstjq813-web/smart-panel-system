@@ -16,7 +16,7 @@ from datetime import datetime
 st.set_page_config(page_title="스마트 분전반 시뮬레이터", page_icon="⚡", layout="wide")
 
 # ── Secrets ───────────────────────────────────────────
-GITHUB_TOKEN   = st.secrets.get("GITHUB_TOKEN", "")
+GITHUB_TOKEN   = st.secrets.get("GH_PAT", "")
 GITHUB_REPO    = st.secrets.get("GITHUB_REPO", "wnstjq813-web/smart-panel-system")
 DATA_REPO      = "wnstjq813-web/smart-panel-data"
 DASHBOARD_REPO = "wnstjq813-web/smart-panel"
