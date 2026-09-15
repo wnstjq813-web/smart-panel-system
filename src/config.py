@@ -1,6 +1,8 @@
 """
 config.py — API 키 및 기본 설정
-수정: KST 시간 유틸 함수 추가 (now_kst)
+[정리] GitHub 토큰 이름을 GH_PAT 하나로 통합
+       GITHUB_TOKEN 변수는 GH_PAT 값을 읽음 (코드 호환 유지)
+       저장소 이름 변수 명확화: DATA_REPO / DASHBOARD_REPO / SYSTEM_REPO
 """
 import os
 from datetime import datetime, timezone, timedelta
@@ -12,17 +14,26 @@ def now_kst() -> datetime:
     """항상 KST 기준 현재 시각 반환 (Actions/로컬 모두 동일)"""
     return datetime.now(tz=KST).replace(tzinfo=None)
 
-# ── API 키 ────────────────────────────────────────────
+# ── API 키 (환경변수/Secrets에서 로드) ────────────────
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 KMA_API_KEY       = os.environ.get("KMA_API_KEY", "")
 KAKAO_API_KEY     = os.environ.get("KAKAO_API_KEY", "")
-GITHUB_TOKEN      = os.environ.get("DATA_REPO_TOKEN", "")
 TELEGRAM_TOKEN    = os.environ.get("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID  = os.environ.get("TELEGRAM_CHAT_ID", "")
 
+# ── GitHub 토큰 (통합: GH_PAT 하나로 모든 저장소 접근) ──
+# 하위 호환: 예전 이름(DATA_REPO_TOKEN)도 fallback으로 확인
+GITHUB_TOKEN = (
+    os.environ.get("GH_PAT")
+    or os.environ.get("DATA_REPO_TOKEN")   # 구 이름 fallback
+    or ""
+)
+
 # ── GitHub 저장소 ─────────────────────────────────────
-GITHUB_REPO    = "wnstjq813-web/smart-panel-data"
-DASHBOARD_REPO = "wnstjq813-web/smart-panel"
+SYSTEM_REPO    = "wnstjq813-web/smart-panel-system"   # 코드
+DATA_REPO      = "wnstjq813-web/smart-panel-data"     # 데이터
+DASHBOARD_REPO = "wnstjq813-web/smart-panel"          # 대시보드
+GITHUB_REPO    = DATA_REPO   # 하위 호환용 (기존 코드가 GITHUB_REPO 참조)
 
 # ── 시스템 기본 설정 ──────────────────────────────────
 CITY          = "홍성"
